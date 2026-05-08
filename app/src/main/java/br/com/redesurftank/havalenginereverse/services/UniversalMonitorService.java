@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.IInterface;
 import java.io.FileDescriptor;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -490,7 +491,7 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     }
 
     @Override
-    public void onBinderDied() {
+    public void onBinderDead() {
         Log.w(TAG, "Shizuku binder died");
         isShizukuInitialized = false;
         EngineReverseStateHolder.INSTANCE.setConnected(false, "Shizuku desconectado");
