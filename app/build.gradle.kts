@@ -41,6 +41,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     buildFeatures {
         aidl = true
         compose = true
