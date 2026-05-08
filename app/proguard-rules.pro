@@ -1,0 +1,4 @@
+-keep class com.beantechs.** { *; }
+-keep class moe.shizuku.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keepattributes *Annotation*
