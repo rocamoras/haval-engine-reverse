@@ -13,7 +13,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.os.FileDescriptor;
+import java.io.FileDescriptor;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
