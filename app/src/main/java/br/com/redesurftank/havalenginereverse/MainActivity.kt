@@ -347,6 +347,24 @@ private fun KeysTab(
         .filter { it.key !in pinnedList }
         .sortedBy { it.key }
 
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title   = { Text("Limpar tudo") },
+            text    = { Text("Apagar todas as chaves, logs e fixadas?") },
+            confirmButton = {
+                TextButton(onClick = { showClearDialog = false; state.clearAll() }) {
+                    Text("Limpar", color = Color(0xFFEF5350))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // Barra de ações
         Row(
@@ -363,7 +381,8 @@ private fun KeysTab(
                     if (pinnedCount > 0) append(" ($pinnedCount fixada${if (pinnedCount > 1) "s" else ""})")
                 },
                 color = Color(0xFFB0BEC5),
-                fontSize = 12.sp
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
             )
             Button(
                 onClick = {
@@ -375,6 +394,15 @@ private fun KeysTab(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Text("Copiar JSON", fontSize = 11.sp)
+            }
+            Spacer(Modifier.width(6.dp))
+            Button(
+                onClick = { showClearDialog = true },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A1A1A)),
+                border = BorderStroke(1.dp, Color(0x44EF5350)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text("Limpar", color = Color(0xFFEF5350), fontSize = 11.sp)
             }
         }
 

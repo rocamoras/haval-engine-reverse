@@ -28,6 +28,12 @@ object EngineReverseStateHolder {
         pinnedKeys.remove(key)
     }
 
+    fun clearAll() {
+        discoveredKeys.clear()
+        eventLog.clear()
+        pinnedKeys.clear()
+    }
+
     data class EventEntry(
         val time: String,
         val key: String,
