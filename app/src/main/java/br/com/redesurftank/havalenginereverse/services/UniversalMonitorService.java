@@ -32,6 +32,9 @@ import com.beantechs.intelligentvehiclecontrol.sdk.IListener;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -52,6 +55,95 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     private static final int    NOTIFICATION_ID = 1;
     private static final String PREFS_NAME      = "engine_reverse_prefs";
     private static final String KEY_SHIZUKU_LIB = "shizuku_lib_location";
+
+    /**
+     * Estratégia 5 — Active Probe.
+     * Candidatos a testar via fetchDatas(). Qualquer um que retorne valor não-nulo
+     * é uma chave real no serviço → será adicionada ao listener "probe".
+     */
+    private static final String[] PROBE_CANDIDATES = {
+        // car.basic
+        "car.basic.inside_temp", "car.basic.outside_temp", "car.basic.vehicle_speed",
+        "car.basic.engine_rpm", "car.basic.fuel_level", "car.basic.battery_voltage",
+        "car.basic.odometer", "car.basic.gear", "car.basic.gear_position",
+        "car.basic.driving_mode", "car.basic.eco_mode", "car.basic.sport_mode",
+        "car.basic.charge_level", "car.basic.range", "car.basic.power_status",
+        // car.engine
+        "car.engine.rpm", "car.engine.oil_temp", "car.engine.coolant_temp",
+        "car.engine.throttle", "car.engine.load", "car.engine.torque",
+        "car.engine.power", "car.engine.fuel_consumption", "car.engine.instantaneous_consumption",
+        "car.engine.average_consumption", "car.engine.range", "car.engine.status",
+        "car.engine.oil_pressure", "car.engine.air_intake_temp", "car.engine.turbo_pressure",
+        // car.body - doors
+        "car.body.door_fl_open", "car.body.door_fr_open", "car.body.door_rl_open", "car.body.door_rr_open",
+        "car.body.door_fl_locked", "car.body.door_fr_locked", "car.body.door_rl_locked", "car.body.door_rr_locked",
+        "car.body.trunk_open", "car.body.trunk_locked", "car.body.hood_open",
+        // car.body - windows
+        "car.body.window_fl", "car.body.window_fr", "car.body.window_rl", "car.body.window_rr",
+        "car.body.window_fl_position", "car.body.window_fr_position",
+        "car.body.window_rl_position", "car.body.window_rr_position",
+        "car.body.sunroof_open", "car.body.sunroof_tilt", "car.body.sunroof_position",
+        // car.body - lights
+        "car.body.hazard_lights", "car.body.fog_lights_front", "car.body.fog_lights_rear",
+        "car.body.headlights", "car.body.headlights_auto", "car.body.daytime_running_lights",
+        "car.body.turn_signal_left", "car.body.turn_signal_right",
+        "car.body.interior_light", "car.body.ambient_light", "car.body.ambient_light_color",
+        // car.body - wipers
+        "car.body.wiper_front", "car.body.wiper_rear", "car.body.wiper_front_speed",
+        // car.body - misc
+        "car.body.central_lock", "car.body.horn", "car.body.vehicle_posture",
+        // car.safety
+        "car.safety.airbag_status", "car.safety.abs_active", "car.safety.esp_active",
+        "car.safety.tpms_fl", "car.safety.tpms_fr", "car.safety.tpms_rl", "car.safety.tpms_rr",
+        "car.safety.tpms_fl_pressure", "car.safety.tpms_fr_pressure",
+        "car.safety.tpms_rl_pressure", "car.safety.tpms_rr_pressure",
+        "car.safety.seatbelt_driver", "car.safety.seatbelt_passenger",
+        "car.safety.seatbelt_rl", "car.safety.seatbelt_rr",
+        "car.safety.collision_warning", "car.safety.lane_departure",
+        "car.safety.blind_spot_left", "car.safety.blind_spot_right",
+        "car.safety.parking_radar_front", "car.safety.parking_radar_rear",
+        "car.safety.reversing_radar", "car.safety.360_camera",
+        // car.hvac (extra além dos conhecidos)
+        "car.hvac.passenger_temperature", "car.hvac.rear_temperature",
+        "car.hvac.rear_fan_speed", "car.hvac.rear_blow_mode",
+        "car.hvac.rear_ac_enable", "car.hvac.ionizer_enable",
+        "car.hvac.fragrance_enable", "car.hvac.fragrance_level",
+        "car.hvac.air_quality", "car.hvac.co2_value", "car.hvac.tvoc_value",
+        // car.comfort_setting (extra além dos conhecidos)
+        "car.comfort_setting.driver_seat_heat_level",
+        "car.comfort_setting.passenger_seat_heat_level",
+        "car.comfort_setting.steering_heat_enable",
+        "car.comfort_setting.driver_seat_massage_level",
+        "car.comfort_setting.passenger_seat_massage_level",
+        "car.comfort_setting.driver_seat_massage_mode",
+        "car.comfort_setting.driver_seat_position_backrest",
+        "car.comfort_setting.driver_seat_position_cushion",
+        "car.comfort_setting.driver_seat_position_height",
+        "car.comfort_setting.driver_seat_position_lumbar",
+        "car.comfort_setting.passenger_seat_position_backrest",
+        "car.comfort_setting.passenger_seat_position_cushion",
+        // car.configure (extra)
+        "car.configure.auto_lock", "car.configure.auto_unlock",
+        "car.configure.welcome_mode", "car.configure.approach_light",
+        "car.configure.one_key_start", "car.configure.remote_start",
+        "car.configure.auto_hold", "car.configure.hill_assist",
+        "car.configure.brake_hold", "car.configure.electric_park_brake",
+        // car.navi
+        "car.navi.destination", "car.navi.remaining_distance",
+        "car.navi.remaining_time", "car.navi.current_road",
+        "car.navi.latitude", "car.navi.longitude", "car.navi.heading",
+        // car.media
+        "car.media.source", "car.media.volume", "car.media.track",
+        "car.media.status", "car.media.artist", "car.media.album",
+        // car.phone
+        "car.phone.call_status", "car.phone.signal_strength", "car.phone.battery",
+        // car.adas
+        "car.adas.acc_status", "car.adas.acc_speed", "car.adas.lka_status",
+        "car.adas.aeb_status", "car.adas.tja_status",
+        // car.charge (NEV/PHEV)
+        "car.charge.status", "car.charge.level", "car.charge.remaining_time",
+        "car.charge.power", "car.charge.current", "car.charge.voltage",
+    };
 
     // Propriedades conhecidas (do climate control) — usadas como seed inicial
     private static final String[] KNOWN_PROPS = {
@@ -138,6 +230,16 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         @Override
         public void onDataChanged(String key, String value) {
             EngineReverseStateHolder.INSTANCE.onEventReceived(key, value, "wildcard");
+        }
+    };
+
+    /**
+     * Listener para as chaves descobertas pelo Active Probe (estratégia 5).
+     */
+    private final IListener probeListener = new IListener.Stub() {
+        @Override
+        public void onDataChanged(String key, String value) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(key, value, "probe");
         }
     };
 
@@ -262,6 +364,58 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         } catch (Exception e) {
             Log.v(TAG, "extractAllStrings failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Estratégia 5 — Active Probe.
+     * Chama fetchDatas() em lotes para todos os candidatos.
+     * Chaves que retornam valor não-nulo são reais → registra listener para elas.
+     */
+    private void runActiveProbe() {
+        if (controlService == null) return;
+        Log.w(TAG, "[S5] Iniciando probe ativo com " + PROBE_CANDIDATES.length + " candidatos...");
+        EngineReverseStateHolder.INSTANCE.setConnected(true, "Probe ativo em andamento...");
+
+        List<String> discovered = new ArrayList<>();
+        int batchSize = 20;
+
+        for (int i = 0; i < PROBE_CANDIDATES.length; i += batchSize) {
+            if (controlService == null) break;
+            String[] batch = Arrays.copyOfRange(PROBE_CANDIDATES, i,
+                    Math.min(i + batchSize, PROBE_CANDIDATES.length));
+            try {
+                String[] values = controlService.fetchDatas(batch);
+                if (values != null) {
+                    for (int j = 0; j < batch.length && j < values.length; j++) {
+                        if (values[j] != null && !values[j].isEmpty()) {
+                            // Chave existe no serviço — registra e reporta
+                            discovered.add(batch[j]);
+                            EngineReverseStateHolder.INSTANCE.onEventReceived(
+                                    batch[j], values[j], "probe");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "[S5] Erro no lote " + i + ": " + e.getMessage());
+            }
+        }
+
+        Log.w(TAG, "[S5] Probe concluído: " + discovered.size() + " chaves novas encontradas");
+
+        if (!discovered.isEmpty() && controlService != null) {
+            try {
+                String[] keys = discovered.toArray(new String[0]);
+                controlService.addListenerKey(getPackageName() + ".probe", keys);
+                controlService.registerDataChangedListener(getPackageName() + ".probe", probeListener);
+                Log.w(TAG, "[S5] Listener registrado para " + discovered.size() + " chaves descobertas");
+            } catch (Exception e) {
+                Log.w(TAG, "[S5] Erro ao registrar probe listener: " + e.getMessage());
+            }
+        }
+
+        int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+        EngineReverseStateHolder.INSTANCE.setConnected(true,
+                "Conectado — " + total + " chaves (" + discovered.size() + " via probe)");
     }
 
     @Override
@@ -479,8 +633,13 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
 
             Shizuku.addBinderDeadListener(this);
             EngineReverseStateHolder.INSTANCE.setConnected(true,
-                    "Conectado — " + EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size() + " chaves iniciais");
+                    "Conectado — " + EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size()
+                    + " chaves iniciais — probe em 3s...");
             Log.w(TAG, "Conectado ao barramento Beantechs com sucesso");
+
+            // Estratégia 5: probe ativo após estabilização
+            backgroundHandler.postDelayed(() -> runActiveProbe(), 3000);
+
             return true;
 
         } catch (Exception e) {
