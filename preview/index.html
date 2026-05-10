@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Haval Engine Reverse</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; }
+  body { background: #121212; color: #E0E0E0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  .hdr { background: #1A1A2E; padding: 8px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #2A2A3E; }
+  .hi { flex: 1; }
+  .ht { color: #4FC3F7; font-size: 18px; font-weight: 700; }
+  .hs { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #EF5350; flex-shrink: 0; }
+  .dot.on { background: #81C784; }
+  .st { color: #B0BEC5; font-size: 11px; }
+  .ubtn { background: none; border: none; cursor: pointer; color: #4FC3F7; padding: 6px; border-radius: 50%; display: flex; align-items: center; transition: background .2s; }
+  .ubtn:hover { background: rgba(79,195,247,.12); }
+  .ver { color: #546E7A; font-size: 11px; }
+
+  .tabs { background: #1A1A2E; display: flex; border-bottom: 2px solid #2A2A3E; }
+  .tab { flex: 1; padding: 10px; text-align: center; font-size: 13px; cursor: pointer; color: #B0BEC5; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+  .tab.active { color: #4FC3F7; border-bottom-color: #4FC3F7; }
+
+  .cnt { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .pnl { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .pnl.active { display: flex; }
+
+  .abar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid #1E1E1E; gap: 8px; }
+  .abar span { color: #B0BEC5; font-size: 12px; flex: 1; }
+  .cbtn { background: #1E3A5F; border: none; color: #E0E0E0; padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .cbtn:hover { background: #2A4F7F; }
+
+  /* Pause button */
+  .pbtn { background: #2A2A1A; border: 1px solid #FFB74D44; color: #FFB74D; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; transition: all .2s; }
+  .pbtn:hover { background: #3A3A1A; }
+  .pbtn.paused { background: #1A2A1A; border-color: #81C78444; color: #81C784; }
+
+  .thead { display: grid; grid-template-columns: 3fr 1.5fr 1fr; padding: 4px 12px; background: #1E1E2E; }
+  .thead span { color: #546E7A; font-size: 10px; font-family: monospace; }
+
+  /* Pinned section */
+  .pinned-header { padding: 4px 12px; background: #1A2A1A; border-bottom: 1px solid #2A3A2A; display: flex; align-items: center; gap: 6px; }
+  .pinned-header span { color: #81C784; font-size: 10px; font-family: monospace; }
+  .pinned-header .ph-count { color: #546E7A; }
+
+  .tbody { flex: 1; overflow-y: auto; }
+  .trow { display: grid; grid-template-columns: 3fr 1.5fr 1fr; padding: 4px 12px; border-bottom: 1px solid #1A1A1A; align-items: center; cursor: default; user-select: none; }
+  .trow:hover { background: #1A1A2E; }
+  .trow.pinned-row { background: #111A11; }
+  .trow.pinned-row:hover { background: #162016; }
+  .trow.pinned-row .ck { color: #A5D6A7; }
+  .ck { color: #80CBC4; font-size: 11px; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cv { color: #E0E0E0; font-size: 11px; font-family: monospace; }
+  .cs { font-size: 9px; font-family: monospace; }
+  .pin-icon { font-size: 10px; margin-right: 4px; }
+
+  /* Log */
+  .lbody { flex: 1; overflow-y: auto; }
+  .lrow { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid #1A1A1A; font-family: monospace; font-size: 10px; cursor: pointer; user-select: none; }
+  .lrow:hover { background: #1A1A2E; }
+  .lrow.dbl-hint { background: #1A2A1A !important; transition: background .3s; }
+  .lt { color: #546E7A; width: 86px; flex-shrink: 0; }
+  .ls { width: 76px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #121212; }
+  ::-webkit-scrollbar-thumb { background: #2A2A3E; border-radius: 2px; }
+
+  @keyframes fi { from { background: rgba(79,195,247,.18); } to { background: transparent; } }
+  .fl { animation: fi .8s ease-out; }
+  @keyframes fiPin { from { background: rgba(129,199,132,.25); } to { background: #111A11; } }
+  .fl-pin { animation: fiPin .6s ease-out forwards; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hi">
+    <div class="ht">Haval Engine Reverse</div>
+    <div class="hs">
+      <div class="dot" id="sd"></div>
+      <span class="st" id="st">Aguardando conexão...</span>
+    </div>
+  </div>
+  <button class="ubtn" onclick="go()" title="Verificar atualização">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+  </button>
+  <span class="ver">v1.0.0</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" id="tk" onclick="sw('k')">Chaves (<span id="kc">0</span>)</div>
+  <div class="tab" id="tl" onclick="sw('l')">Log (<span id="lc">0</span>)</div>
+</div>
+
+<div class="cnt">
+
+  <!-- KEYS -->
+  <div class="pnl active" id="pk">
+    <div class="abar">
+      <span id="ks">0 chaves únicas descobertas</span>
+      <button class="cbtn" onclick="copyJson()">Copiar JSON</button>
+    </div>
+    <div class="thead"><span>CHAVE</span><span>VALOR</span><span>FONTE</span></div>
+    <div class="tbody" id="kt"></div>
+  </div>
+
+  <!-- LOG -->
+  <div class="pnl" id="pl">
+    <div class="abar">
+      <span id="lls">0 eventos</span>
+      <button class="pbtn" id="pbtn" onclick="togglePause()">
+        <span id="picon">⏸</span> <span id="ptxt">Pausar</span>
+      </button>
+      <button class="cbtn" onclick="copyLog()">Copiar Log</button>
+    </div>
+    <div class="lbody" id="lt"></div>
+  </div>
+
+</div>
+
+<script>
+const SC = { listener:'#81C784', 'raw-transact':'#FFB74D', wildcard:'#CE93D8', 'empty-key':'#4FC3F7', 'initial-fetch':'#546E7A', 'reply-code-4':'#FF8A65' };
+function sc(s) { return SC[s] || '#B0BEC5'; }
+
+const dk = {}, el = [];
+const pinnedKeys = new Set();  // chaves fixadas pelo duplo clique
+let logPaused = false;
+
+// ── Adiciona evento ─────────────────────────────────────────────
+function addK(k, v, s) {
+  const isNew = !(k in dk);
+  dk[k] = { v, s };
+  const n = new Date();
+  const t = n.toTimeString().slice(0,8) + '.' + String(n.getMilliseconds()).padStart(3,'0');
+  el.unshift({ t, k, v, s });
+  if (el.length > 200) el.pop();
+  rK(isNew ? k : null);
+  if (!logPaused) rL();
+  up();
+}
+
+// ── Render keys ──────────────────────────────────────────────────
+function rK(flashKey) {
+  const pinned  = [...pinnedKeys].sort();
+  const regular = Object.entries(dk)
+    .filter(([k]) => !pinnedKeys.has(k))
+    .sort((a,b) => a[0].localeCompare(b[0]));
+
+  const tb = document.getElementById('kt');
+  tb.innerHTML = '';
+
+  // Seção de fixadas
+  if (pinned.length > 0) {
+    const ph = document.createElement('div');
+    ph.className = 'pinned-header';
+    ph.innerHTML = `<span>📌 FIXADAS</span><span class="ph-count">${pinned.length} chave${pinned.length > 1 ? 's' : ''} — duplo clique para desafixar</span>`;
+    tb.appendChild(ph);
+
+    pinned.forEach(k => {
+      const { v, s } = dk[k] || { v: '--', s: '' };
+      const r = document.createElement('div');
+      r.className = 'trow pinned-row' + (k === flashKey ? ' fl-pin' : '');
+      r.title = 'Duplo clique para desafixar';
+      r.ondblclick = () => unpinKey(k);
+      r.innerHTML = `<div class="ck"><span class="pin-icon">📌</span>${k}</div><div class="cv">${v}</div><div class="cs" style="color:${sc(s)}">${s}</div>`;
+      tb.appendChild(r);
+    });
+
+    // Divisor
+    const div = document.createElement('div');
+    div.style.cssText = 'height:1px;background:#2A2A3E;margin:2px 0';
+    tb.appendChild(div);
+  }
+
+  // Seção regular
+  regular.forEach(([k, { v, s }]) => {
+    const r = document.createElement('div');
+    r.className = 'trow' + (k === flashKey ? ' fl' : '');
+    r.title = 'Duplo clique para fixar no topo';
+    r.ondblclick = () => pinKey(k);
+    r.innerHTML = `<div class="ck">${k}</div><div class="cv">${v}</div><div class="cs" style="color:${sc(s)}">${s}</div>`;
+    tb.appendChild(r);
+  });
+
+  document.getElementById('ks').textContent =
+    Object.keys(dk).length + ' chaves únicas descobertas' +
+    (pinnedKeys.size > 0 ? ` (${pinnedKeys.size} fixada${pinnedKeys.size > 1 ? 's' : ''})` : '');
+}
+
+// ── Render log ───────────────────────────────────────────────────
+function rL() {
+  const tb = document.getElementById('lt');
+  tb.innerHTML = '';
+  el.slice(0, 100).forEach((e, i) => {
+    const r = document.createElement('div');
+    r.className = 'lrow' + (i === 0 ? ' fl' : '');
+    r.title = 'Duplo clique para fixar "' + e.k + '" na aba Chaves';
+    r.ondblclick = () => pinKeyFromLog(e.k, r);
+    r.innerHTML = `<span class="lt">${e.t}</span><span class="ls" style="color:${sc(e.s)}">${e.s}</span><span style="color:#E0E0E0"><b style="color:#80CBC4">${e.k}</b> = ${e.v}</span>`;
+    tb.appendChild(r);
+  });
+  document.getElementById('lls').textContent = `${el.length} eventos${logPaused ? ' — ⏸ pausado' : ''}`;
+}
+
+// ── Pin / Unpin ──────────────────────────────────────────────────
+function pinKey(k) {
+  if (pinnedKeys.has(k)) return;
+  pinnedKeys.add(k);
+  rK(k);
+  // Troca para aba Chaves brevemente para dar feedback visual
+  sw('k');
+}
+
+function unpinKey(k) {
+  pinnedKeys.delete(k);
+  rK(null);
+}
+
+function pinKeyFromLog(k, rowEl) {
+  // Flash visual na linha do log
+  rowEl.classList.add('dbl-hint');
+  setTimeout(() => rowEl.classList.remove('dbl-hint'), 400);
+
+  if (!pinnedKeys.has(k)) {
+    pinnedKeys.add(k);
+    // Troca para aba Chaves para mostrar o resultado
+    setTimeout(() => { sw('k'); rK(k); }, 150);
+  }
+}
+
+// ── Pause ────────────────────────────────────────────────────────
+function togglePause() {
+  logPaused = !logPaused;
+  const btn  = document.getElementById('pbtn');
+  const icon = document.getElementById('picon');
+  const txt  = document.getElementById('ptxt');
+  if (logPaused) {
+    btn.classList.add('paused');
+    icon.textContent = '▶';
+    txt.textContent  = 'Continuar';
+  } else {
+    btn.classList.remove('paused');
+    icon.textContent = '⏸';
+    txt.textContent  = 'Pausar';
+    rL(); // renderiza o que acumulou enquanto pausado
+  }
+  document.getElementById('lls').textContent = `${el.length} eventos${logPaused ? ' — ⏸ pausado' : ''}`;
+}
+
+// ── Utils ────────────────────────────────────────────────────────
+function up() {
+  document.getElementById('kc').textContent = Object.keys(dk).length;
+  document.getElementById('lc').textContent = el.length;
+}
+
+function sw(t) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.pnl').forEach(x => x.classList.remove('active'));
+  document.getElementById('t' + t).classList.add('active');
+  document.getElementById('p' + t).classList.add('active');
+}
+
+function copyJson() {
+  const json = '{\n' + Object.entries(dk).sort((a,b) => a[0].localeCompare(b[0]))
+    .map(([k,{v}]) => `  "${k}": "${v}"`).join(',\n') + '\n}';
+  navigator.clipboard.writeText(json).catch(() => {});
+  const btn = event.target; btn.textContent = 'Copiado!';
+  setTimeout(() => btn.textContent = 'Copiar JSON', 1500);
+}
+
+function copyLog() {
+  const text = el.map(e => `[${e.t}] ${e.s} | ${e.k} = ${e.v}`).join('\n');
+  navigator.clipboard.writeText(text).catch(() => {});
+  const btn = event.target; btn.textContent = 'Copiado!';
+  setTimeout(() => btn.textContent = 'Copiar Log', 1500);
+}
+
+// ── Simulação ────────────────────────────────────────────────────
+const KN = [
+  ['car.hvac.auto_enable','1','listener'],['car.basic.inside_temp','26.5','listener'],
+  ['car.hvac.driver_temperature','24.0','listener'],['car.hvac.power_mode','1','listener'],
+  ['car.hvac.ac_enable','1','listener'],['car.hvac.front_defrost_enable','0','listener'],
+  ['car.hvac.heating_enable','0','listener'],['car.hvac.Intelligent_switch_enable','1','listener'],
+  ['car.hvac.setting.limit_enable','0','listener'],['car.hvac.front_temperature_range','16,32','initial-fetch'],
+  ['car.hvac.pm2.5_value','12','listener'],['car.hvac.setting.comfort_curve','1','listener'],
+  ['car.comfort_setting.chair_memory.auto_enable','0','initial-fetch'],
+  ['car.configure.ass_memory_setting','2','initial-fetch'],
+  ['car.comfort_setting.driver_seat_ventilation_level','2','listener'],
+  ['car.comfort_setting.passenger_seat_ventilation_level','1','listener'],
+  ['car.body.door_fl_open','0','wildcard'],['car.body.door_fr_open','0','wildcard'],
+  ['car.body.trunk_open','0','wildcard'],['car.basic.outside_temp','28.0','raw-transact'],
+  ['car.basic.vehicle_speed','0','raw-transact'],['car.basic.engine_rpm','800','raw-transact'],
+  ['car.basic.fuel_level','72','raw-transact'],['car.basic.battery_voltage','12.6','raw-transact'],
+  ['car.hvac.rear_defrost_enable','0','wildcard'],['car.hvac.fan_speed','3','wildcard'],
+  ['car.hvac.blow_mode','2','wildcard'],['car.comfort_setting.driver_seat_heat_level','0','empty-key'],
+  ['car.comfort_setting.steering_heat_enable','0','empty-key'],['car.configure.language','0','reply-code-4']
+];
+
+let started = false;
+function go() {
+  if (started) return;
+  started = true;
+  document.getElementById('st').textContent = 'Conectando...';
+  let i = 0;
+  function nx() {
+    if (i < KN.length) {
+      addK(...KN[i++]);
+      setTimeout(nx, i < 16 ? 55 : 100 + Math.random() * 150);
+    } else {
+      document.getElementById('sd').classList.add('on');
+      document.getElementById('st').textContent = 'Conectado — ' + Object.keys(dk).length + ' chaves descobertas';
+      setInterval(() => {
+        const lk = [
+          ['car.basic.inside_temp', (24 + Math.random()*4).toFixed(1), 'listener'],
+          ['car.hvac.pm2.5_value',  String(Math.floor(8 + Math.random()*20)), 'listener'],
+          ['car.basic.vehicle_speed', String(Math.floor(Math.random()*120)), 'raw-transact'],
+          ['car.basic.engine_rpm',    String(Math.floor(700 + Math.random()*3000)), 'raw-transact'],
+        ];
+        addK(...lk[Math.floor(Math.random() * lk.length)]);
+      }, 1200);
+    }
+  }
+  setTimeout(nx, 300);
+}
+go();
+</script>
+</body>
+</html>

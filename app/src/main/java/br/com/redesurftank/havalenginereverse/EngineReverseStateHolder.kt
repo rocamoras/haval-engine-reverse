@@ -17,6 +17,17 @@ object EngineReverseStateHolder {
     // log cronológico dos eventos
     val eventLog = mutableStateListOf<EventEntry>()
 
+    // chaves fixadas pelo usuário (aparecem no topo da aba Chaves)
+    val pinnedKeys = mutableStateListOf<String>()
+
+    fun pinKey(key: String) {
+        if (!pinnedKeys.contains(key)) pinnedKeys.add(0, key)
+    }
+
+    fun unpinKey(key: String) {
+        pinnedKeys.remove(key)
+    }
+
     data class EventEntry(
         val time: String,
         val key: String,

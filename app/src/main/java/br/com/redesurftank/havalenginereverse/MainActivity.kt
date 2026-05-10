@@ -12,7 +12,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -80,6 +83,14 @@ fun DiscoveryScreen() {
     var showPermDialog   by remember { mutableStateOf(false) }
     var downloadJob      by remember { mutableStateOf<Job?>(null) }
     var selectedTab      by remember { mutableIntStateOf(0) }
+
+    // Pause state for Log tab
+    var logPaused  by remember { mutableStateOf(false) }
+    var frozenLog  by remember { mutableStateOf<List<EngineReverseStateHolder.EventEntry>>(emptyList()) }
+
+    LaunchedEffect(logPaused) {
+        if (logPaused) frozenLog = state.eventLog.toList()
+    }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -306,18 +317,35 @@ fun DiscoveryScreen() {
         }
 
         when (selectedTab) {
-            0 -> KeysTab(state)
-            1 -> LogTab(state)
+            0 -> KeysTab(
+                state = state,
+                onUnpinKey = { state.unpinKey(it) }
+            )
+            1 -> LogTab(
+                state         = state,
+                paused        = logPaused,
+                displayLog    = if (logPaused) frozenLog else state.eventLog,
+                onTogglePause = { logPaused = !logPaused },
+                onPinKey      = { key ->
+                    state.pinKey(key)
+                    selectedTab = 0
+                }
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun KeysTab(state: EngineReverseStateHolder) {
-    val context = LocalContext.current
-    val sortedKeys = remember(state.discoveredKeys.size) {
-        state.discoveredKeys.entries.sortedBy { it.key }
-    }
+private fun KeysTab(
+    state: EngineReverseStateHolder,
+    onUnpinKey: (String) -> Unit
+) {
+    val context     = LocalContext.current
+    val pinnedList  = state.pinnedKeys
+    val sortedRegular = state.discoveredKeys.entries
+        .filter { it.key !in pinnedList }
+        .sortedBy { it.key }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Barra de ações
@@ -328,8 +356,12 @@ private fun KeysTab(state: EngineReverseStateHolder) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val pinnedCount = pinnedList.size
             Text(
-                "${state.discoveredKeys.size} chaves únicas descobertas",
+                buildString {
+                    append("${state.discoveredKeys.size} chaves únicas descobertas")
+                    if (pinnedCount > 0) append(" ($pinnedCount fixada${if (pinnedCount > 1) "s" else ""})")
+                },
                 color = Color(0xFFB0BEC5),
                 fontSize = 12.sp
             )
@@ -362,11 +394,86 @@ private fun KeysTab(state: EngineReverseStateHolder) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(sortedKeys, key = { it.key }) { (key, value) ->
+
+            // ── Seção de chaves fixadas ──────────────────────────────────
+            if (pinnedList.isNotEmpty()) {
+                item(key = "__pinned_header__") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF111A11))
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "📌 FIXADAS",
+                            color = Color(0xFF81C784),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${pinnedList.size} chave${if (pinnedList.size > 1) "s" else ""} — duplo clique para desafixar",
+                            color = Color(0xFF546E7A),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                items(pinnedList, key = { "pin_$it" }) { key ->
+                    val value   = state.discoveredKeys[key] ?: "--"
+                    val lastLog = state.eventLog.firstOrNull { it.key == key }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF111A11))
+                            .combinedClickable(onClick = {}, onDoubleClick = { onUnpinKey(key) })
+                            .padding(horizontal = 12.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "📌 $key",
+                            color = Color(0xFFA5D6A7),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            value,
+                            color = Color(0xFFE0E0E0),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(0.25f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            lastLog?.source ?: "",
+                            color = sourceColor(lastLog?.source ?: ""),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(0.15f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    HorizontalDivider(color = Color(0xFF1A2A1A), thickness = 0.5.dp)
+                }
+
+                item(key = "__pinned_divider__") {
+                    HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 1.dp)
+                }
+            }
+
+            // ── Seção regular ────────────────────────────────────────────
+            items(sortedRegular, key = { it.key }) { (key, value) ->
                 val lastLog = state.eventLog.firstOrNull { it.key == key }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .combinedClickable(onClick = {}, onDoubleClick = { state.pinKey(key) })
                         .padding(horizontal = 12.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -404,8 +511,15 @@ private fun KeysTab(state: EngineReverseStateHolder) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LogTab(state: EngineReverseStateHolder) {
+private fun LogTab(
+    state: EngineReverseStateHolder,
+    paused: Boolean,
+    displayLog: List<EngineReverseStateHolder.EventEntry>,
+    onTogglePause: () -> Unit,
+    onPinKey: (String) -> Unit
+) {
     val context = LocalContext.current
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -415,7 +529,31 @@ private fun LogTab(state: EngineReverseStateHolder) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Últimos ${state.eventLog.size} eventos", color = Color(0xFFB0BEC5), fontSize = 12.sp)
+            Text(
+                "Últimos ${state.eventLog.size} eventos${if (paused) " — ⏸ pausado" else ""}",
+                color = Color(0xFFB0BEC5),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
+            // Botão Pausar / Continuar
+            Button(
+                onClick = onTogglePause,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (paused) Color(0xFF1A2A1A) else Color(0xFF2A2A1A)
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (paused) Color(0x4481C784) else Color(0x44FFB74D)
+                ),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    if (paused) "▶ Continuar" else "⏸ Pausar",
+                    color = if (paused) Color(0xFF81C784) else Color(0xFFFFB74D),
+                    fontSize = 11.sp
+                )
+            }
+            Spacer(Modifier.width(6.dp))
             Button(
                 onClick = {
                     val text = state.eventLog.joinToString("\n") {
@@ -432,10 +570,11 @@ private fun LogTab(state: EngineReverseStateHolder) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(state.eventLog, key = { "${it.time}-${it.key}" }) { entry ->
+            items(displayLog, key = { "${it.time}-${it.key}" }) { entry ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .combinedClickable(onClick = {}, onDoubleClick = { onPinKey(entry.key) })
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                         .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically
