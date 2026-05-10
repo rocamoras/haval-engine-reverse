@@ -643,6 +643,7 @@ private fun sourceColor(source: String): Color = when {
     source.startsWith("empty-key")     -> Color(0xFF4FC3F7)
     source.startsWith("initial-fetch") -> Color(0xFF546E7A)
     source.startsWith("reply")         -> Color(0xFFFF8A65)
-    source.startsWith("probe")         -> Color(0xFFF48FB1)  // rosa — chaves descobertas pelo probe
+    source.startsWith("probe")         -> Color(0xFFF48FB1)  // rosa  — S5 active probe
+    source.startsWith("apk-scan")      -> Color(0xFFFFD54F)  // ouro  — S6 APK scan
     else                               -> Color(0xFFB0BEC5)
 }

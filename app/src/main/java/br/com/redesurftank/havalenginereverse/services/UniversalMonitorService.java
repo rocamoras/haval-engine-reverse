@@ -244,6 +244,16 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     };
 
     /**
+     * Listener para as chaves descobertas pelo APK String Scan (estratégia 6).
+     */
+    private final IListener apkScanListener = new IListener.Stub() {
+        @Override
+        public void onDataChanged(String key, String value) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(key, value, "apk-scan");
+        }
+    };
+
+    /**
      * Proxy do IBinder do serviço Beantechs — intercepta todas as chamadas de saída
      * e as respostas recebidas (estratégia 4: BinderProxy).
      */
@@ -416,6 +426,131 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
         EngineReverseStateHolder.INSTANCE.setConnected(true,
                 "Conectado — " + total + " chaves (" + discovered.size() + " via probe)");
+    }
+
+    /**
+     * Estratégia 6 — APK String Scan.
+     *
+     * Usa grep diretamente no binário APK do Beantechs para extrair TODAS as strings
+     * que seguem o padrão car.xxx.yyy — incluindo categorias completamente desconhecidas.
+     * Não depende de nenhuma lista prévia; qualquer chave hard-coded no código-fonte
+     * do serviço será encontrada.
+     *
+     * Fluxo:
+     *   1. pm path → localiza o APK
+     *   2. grep -oa → extrai strings car.* / cmd.* do binário (redireciona para tmp)
+     *   3. cat → lê o resultado
+     *   4. fetchDatas em lote → confirma quais chaves existem de fato
+     *   5. addListenerKey + registerDataChangedListener para as confirmadas
+     */
+    private void runApkStringScan() {
+        TelnetClientWrapper telnet = null;
+        try {
+            telnet = new TelnetClientWrapper();
+            telnet.connect("127.0.0.1", 23);
+
+            // 1. Localiza o APK
+            String pmOut = telnet.executeCommand(
+                    "pm path com.beantechs.intelligentvehiclecontrol 2>/dev/null | head -1");
+            String apkPath = pmOut.replace("package:", "").trim();
+
+            if (apkPath.isEmpty()) {
+                Log.w(TAG, "[S6] APK não encontrado via pm path");
+                return;
+            }
+            Log.w(TAG, "[S6] APK localizado: " + apkPath);
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S6: escaneando APK...");
+
+            // 2. Extrai strings car.* e cmd.* do binário, grava em arquivo temporário
+            //    (evita timeout no TelnetClientWrapper caso o grep seja demorado)
+            String tmpFile = "/data/local/tmp/beantechs_keys_scan.txt";
+            telnet.executeCommand(
+                    "grep -oa 'car\\.[a-zA-Z_][a-zA-Z0-9_.]*\\|cmd\\.[a-zA-Z_][a-zA-Z0-9_.]*' "
+                    + apkPath + " 2>/dev/null | sort -u > " + tmpFile + " ; echo ok",
+                    20000   // 20s para APKs grandes
+            );
+
+            // 3. Lê o resultado do arquivo
+            String content = telnet.executeCommand("cat " + tmpFile + " 2>/dev/null", 10000);
+            telnet.executeCommand("rm " + tmpFile + " 2>/dev/null");
+            telnet.disconnect();
+            telnet = null;
+
+            if (content.isEmpty()) {
+                Log.w(TAG, "[S6] Nenhuma string extraída do APK");
+                EngineReverseStateHolder.INSTANCE.setConnected(true,
+                        "S6: nenhuma string encontrada no APK");
+                return;
+            }
+
+            // 4. Filtra candidatos ainda não conhecidos
+            List<String> newCandidates = new ArrayList<>();
+            for (String line : content.split("\n")) {
+                String key = line.trim();
+                if (!key.isEmpty()
+                        && !EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().containsKey(key)) {
+                    newCandidates.add(key);
+                }
+            }
+            Log.w(TAG, "[S6] " + newCandidates.size() + " candidatos novos extraídos do APK");
+
+            if (newCandidates.isEmpty() || controlService == null) {
+                EngineReverseStateHolder.INSTANCE.setConnected(true,
+                        "S6: sem chaves novas (todas já conhecidas)");
+                return;
+            }
+
+            // 5. Testa via fetchDatas em lotes
+            List<String> confirmed = new ArrayList<>();
+            int batchSize = 20;
+            for (int i = 0; i < newCandidates.size(); i += batchSize) {
+                if (controlService == null) break;
+                List<String> batch = newCandidates.subList(i,
+                        Math.min(i + batchSize, newCandidates.size()));
+                try {
+                    String[] values = controlService.fetchDatas(batch.toArray(new String[0]));
+                    if (values != null) {
+                        for (int j = 0; j < batch.size() && j < values.length; j++) {
+                            if (values[j] != null && !values[j].isEmpty()) {
+                                confirmed.add(batch.get(j));
+                                EngineReverseStateHolder.INSTANCE.onEventReceived(
+                                        batch.get(j), values[j], "apk-scan");
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "[S6] Erro no lote fetch: " + e.getMessage());
+                }
+            }
+
+            Log.w(TAG, "[S6] " + confirmed.size() + " chaves reais descobertas via APK scan");
+
+            // 6. Registra listener para as chaves confirmadas
+            if (!confirmed.isEmpty() && controlService != null) {
+                try {
+                    controlService.addListenerKey(getPackageName() + ".apkscan",
+                            confirmed.toArray(new String[0]));
+                    controlService.registerDataChangedListener(
+                            getPackageName() + ".apkscan", apkScanListener);
+                    Log.w(TAG, "[S6] Listener apkscan registrado para "
+                            + confirmed.size() + " chaves");
+                } catch (Exception e) {
+                    Log.w(TAG, "[S6] Erro ao registrar apkscan listener: " + e.getMessage());
+                }
+            }
+
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "Conectado — " + total + " chaves ("
+                    + confirmed.size() + " via APK scan)");
+
+        } catch (Exception e) {
+            Log.e(TAG, "[S6] Erro no APK scan: " + e.getMessage(), e);
+        } finally {
+            if (telnet != null) {
+                try { telnet.disconnect(); } catch (Exception ignored) {}
+            }
+        }
     }
 
     @Override
@@ -638,7 +773,11 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             Log.w(TAG, "Conectado ao barramento Beantechs com sucesso");
 
             // Estratégia 5: probe ativo após estabilização
-            backgroundHandler.postDelayed(() -> runActiveProbe(), 3000);
+            backgroundHandler.postDelayed(() -> {
+                runActiveProbe();
+                // Estratégia 6: APK scan logo após o probe (probe demora ~1-2s)
+                backgroundHandler.postDelayed(() -> runApkStringScan(), 5000);
+            }, 3000);
 
             return true;
 
