@@ -30,12 +30,23 @@ import androidx.core.content.ContextCompat;
 import com.beantechs.intelligentvehiclecontrol.IIntelligentVehicleControlService;
 import com.beantechs.intelligentvehiclecontrol.sdk.IListener;
 
+import java.io.ByteArrayOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import br.com.redesurftank.havalenginereverse.App;
@@ -428,128 +439,159 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 "Conectado — " + total + " chaves (" + discovered.size() + " via probe)");
     }
 
+    // ── Estratégia 6 helpers ─────────────────────────────────────────
+
+    /** Lê todos os bytes de um InputStream sem usar readAllBytes() (API < 33). */
+    private byte[] readAllBytesCompat(java.io.InputStream is) throws java.io.IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) != -1) out.write(buf, 0, n);
+        return out.toByteArray();
+    }
+
     /**
-     * Estratégia 6 — APK String Scan.
-     *
-     * Usa grep diretamente no binário APK do Beantechs para extrair TODAS as strings
-     * que seguem o padrão car.xxx.yyy — incluindo categorias completamente desconhecidas.
-     * Não depende de nenhuma lista prévia; qualquer chave hard-coded no código-fonte
-     * do serviço será encontrada.
-     *
-     * Fluxo:
-     *   1. pm path → localiza o APK
-     *   2. grep -oa → extrai strings car.* / cmd.* do binário (redireciona para tmp)
-     *   3. cat → lê o resultado
-     *   4. fetchDatas em lote → confirma quais chaves existem de fato
-     *   5. addListenerKey + registerDataChangedListener para as confirmadas
+     * Varre um APK (ZIP) em busca de strings car.* / cmd.* dentro dos
+     * arquivos DEX, .so e assets/ — que ficam COMPRIMIDOS no ZIP e por isso
+     * não seriam encontrados com grep no binário bruto.
      */
-    private void runApkStringScan() {
-        TelnetClientWrapper telnet = null;
+    private void scanZipForKeys(String apkPath, Pattern pat, Set<String> out) {
         try {
-            telnet = new TelnetClientWrapper();
-            telnet.connect("127.0.0.1", 23);
-
-            // 1. Localiza o APK
-            String pmOut = telnet.executeCommand(
-                    "pm path com.beantechs.intelligentvehiclecontrol 2>/dev/null | head -1");
-            String apkPath = pmOut.replace("package:", "").trim();
-
-            if (apkPath.isEmpty()) {
-                Log.w(TAG, "[S6] APK não encontrado via pm path");
-                return;
-            }
-            Log.w(TAG, "[S6] APK localizado: " + apkPath);
-            EngineReverseStateHolder.INSTANCE.setConnected(true, "S6: escaneando APK...");
-
-            // 2. Extrai strings car.* e cmd.* do binário, grava em arquivo temporário
-            //    (evita timeout no TelnetClientWrapper caso o grep seja demorado)
-            String tmpFile = "/data/local/tmp/beantechs_keys_scan.txt";
-            telnet.executeCommand(
-                    "grep -oa 'car\\.[a-zA-Z_][a-zA-Z0-9_.]*\\|cmd\\.[a-zA-Z_][a-zA-Z0-9_.]*' "
-                    + apkPath + " 2>/dev/null | sort -u > " + tmpFile + " ; echo ok",
-                    20000   // 20s para APKs grandes
-            );
-
-            // 3. Lê o resultado do arquivo
-            String content = telnet.executeCommand("cat " + tmpFile + " 2>/dev/null", 10000);
-            telnet.executeCommand("rm " + tmpFile + " 2>/dev/null");
-            telnet.disconnect();
-            telnet = null;
-
-            if (content.isEmpty()) {
-                Log.w(TAG, "[S6] Nenhuma string extraída do APK");
-                EngineReverseStateHolder.INSTANCE.setConnected(true,
-                        "S6: nenhuma string encontrada no APK");
-                return;
-            }
-
-            // 4. Filtra candidatos ainda não conhecidos
-            List<String> newCandidates = new ArrayList<>();
-            for (String line : content.split("\n")) {
-                String key = line.trim();
-                if (!key.isEmpty()
-                        && !EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().containsKey(key)) {
-                    newCandidates.add(key);
+            ZipFile zip = new ZipFile(apkPath);
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                boolean scan = name.matches("classes\\d*\\.dex")
+                        || name.endsWith(".so")
+                        || name.startsWith("assets/");
+                if (!scan) continue;
+                try (java.io.InputStream is = zip.getInputStream(entry)) {
+                    // ISO-8859-1: mapeamento 1:1 byte→char — preserva bytes binários
+                    String content = new String(readAllBytesCompat(is), StandardCharsets.ISO_8859_1);
+                    Matcher m = pat.matcher(content);
+                    while (m.find()) {
+                        String key = m.group();
+                        // Exige ao menos dois pontos: car.categoria.chave
+                        long dots = key.chars().filter(c -> c == '.').count();
+                        if (dots >= 2 && !key.endsWith(".")) out.add(key);
+                    }
+                } catch (Exception e) {
+                    Log.v(TAG, "[S6] Entrada ignorada " + name + ": " + e.getMessage());
                 }
             }
-            Log.w(TAG, "[S6] " + newCandidates.size() + " candidatos novos extraídos do APK");
+            zip.close();
+        } catch (Exception e) {
+            Log.w(TAG, "[S6] Erro ao abrir " + apkPath + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Estratégia 6 — DEX String Scan.
+     *
+     * Correção em relação à versão anterior (que rodava grep no APK raw):
+     * APK é um ZIP e o código DEX fica COMPRIMIDO — grep no binário não vê
+     * nada dentro das classes comprimidas, por isso só achava 1 string.
+     *
+     * Esta versão usa ZipFile para descomprimir cada classes*.dex / .so em
+     * memória e aplica regex no bytecode descomprimido. Também varre TODOS
+     * os pacotes Beantechs instalados (não só intelligentvehiclecontrol).
+     *
+     * Fluxo:
+     *   1. PackageManager → lista todos os pacotes que contêm "beantechs"
+     *   2. Para cada APK: abre como ZipFile, varre DEX + .so + assets
+     *   3. Regex car\.xxx\.yyy / cmd\.xxx\.yyy no bytecode descomprimido
+     *   4. fetchDatas em lote → confirma chaves com valor real no serviço
+     *   5. addListenerKey + registerDataChangedListener (source "apk-scan")
+     */
+    private void runApkStringScan() {
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S6: varrendo DEX de pacotes Beantechs...");
+
+            // 1. Localiza todos os APKs de pacotes Beantechs
+            Set<String> apkPaths = new HashSet<>();
+            List<ApplicationInfo> apps = getPackageManager()
+                    .getInstalledApplications(PackageManager.GET_META_DATA);
+            for (ApplicationInfo app : apps) {
+                if (!app.packageName.toLowerCase().contains("beantechs")) continue;
+                if (app.sourceDir != null) apkPaths.add(app.sourceDir);
+                if (app.splitSourceDirs != null)
+                    apkPaths.addAll(Arrays.asList(app.splitSourceDirs));
+                Log.w(TAG, "[S6] Pacote encontrado: " + app.packageName);
+            }
+
+            if (apkPaths.isEmpty()) {
+                Log.w(TAG, "[S6] Nenhum pacote Beantechs encontrado");
+                return;
+            }
+
+            // 2. Extrai strings car.* / cmd.* dos DEX descomprimidos
+            Pattern keyPat = Pattern.compile(
+                    "(?:car|cmd)\\.[a-zA-Z_][a-zA-Z0-9_.]{2,60}");
+            Set<String> allCandidates = new TreeSet<>();
+            for (String apkPath : apkPaths) {
+                Log.w(TAG, "[S6] Varrendo: " + apkPath);
+                scanZipForKeys(apkPath, keyPat, allCandidates);
+            }
+            Log.w(TAG, "[S6] " + allCandidates.size() + " candidatos totais extraídos dos DEX");
+
+            // 3. Remove os já conhecidos
+            List<String> newCandidates = new ArrayList<>();
+            for (String k : allCandidates) {
+                if (!EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().containsKey(k))
+                    newCandidates.add(k);
+            }
+            Log.w(TAG, "[S6] " + newCandidates.size() + " candidatos novos para testar");
 
             if (newCandidates.isEmpty() || controlService == null) {
                 EngineReverseStateHolder.INSTANCE.setConnected(true,
-                        "S6: sem chaves novas (todas já conhecidas)");
+                        "S6 concluído: sem chaves novas");
                 return;
             }
 
-            // 5. Testa via fetchDatas em lotes
+            // 4. Confirma via fetchDatas em lotes de 20
             List<String> confirmed = new ArrayList<>();
-            int batchSize = 20;
-            for (int i = 0; i < newCandidates.size(); i += batchSize) {
+            for (int i = 0; i < newCandidates.size(); i += 20) {
                 if (controlService == null) break;
                 List<String> batch = newCandidates.subList(i,
-                        Math.min(i + batchSize, newCandidates.size()));
+                        Math.min(i + 20, newCandidates.size()));
                 try {
-                    String[] values = controlService.fetchDatas(batch.toArray(new String[0]));
-                    if (values != null) {
-                        for (int j = 0; j < batch.size() && j < values.length; j++) {
-                            if (values[j] != null && !values[j].isEmpty()) {
+                    String[] vals = controlService.fetchDatas(batch.toArray(new String[0]));
+                    if (vals != null) {
+                        for (int j = 0; j < batch.size() && j < vals.length; j++) {
+                            if (vals[j] != null && !vals[j].isEmpty()) {
                                 confirmed.add(batch.get(j));
                                 EngineReverseStateHolder.INSTANCE.onEventReceived(
-                                        batch.get(j), values[j], "apk-scan");
+                                        batch.get(j), vals[j], "apk-scan");
                             }
                         }
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "[S6] Erro no lote fetch: " + e.getMessage());
+                    Log.w(TAG, "[S6] Erro lote fetch: " + e.getMessage());
                 }
             }
+            Log.w(TAG, "[S6] " + confirmed.size() + " chaves confirmadas via APK scan");
 
-            Log.w(TAG, "[S6] " + confirmed.size() + " chaves reais descobertas via APK scan");
-
-            // 6. Registra listener para as chaves confirmadas
+            // 5. Registra listener para as chaves confirmadas
             if (!confirmed.isEmpty() && controlService != null) {
                 try {
                     controlService.addListenerKey(getPackageName() + ".apkscan",
                             confirmed.toArray(new String[0]));
                     controlService.registerDataChangedListener(
                             getPackageName() + ".apkscan", apkScanListener);
-                    Log.w(TAG, "[S6] Listener apkscan registrado para "
-                            + confirmed.size() + " chaves");
+                    Log.w(TAG, "[S6] Listener apkscan registrado: " + confirmed.size() + " chaves");
                 } catch (Exception e) {
-                    Log.w(TAG, "[S6] Erro ao registrar apkscan listener: " + e.getMessage());
+                    Log.w(TAG, "[S6] Erro ao registrar listener: " + e.getMessage());
                 }
             }
 
             int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
             EngineReverseStateHolder.INSTANCE.setConnected(true,
-                    "Conectado — " + total + " chaves ("
-                    + confirmed.size() + " via APK scan)");
+                    "Conectado — " + total + " chaves (" + confirmed.size() + " via APK scan)");
 
         } catch (Exception e) {
-            Log.e(TAG, "[S6] Erro no APK scan: " + e.getMessage(), e);
-        } finally {
-            if (telnet != null) {
-                try { telnet.disconnect(); } catch (Exception ignored) {}
-            }
+            Log.e(TAG, "[S6] Erro no DEX scan: " + e.getMessage(), e);
         }
     }
 
