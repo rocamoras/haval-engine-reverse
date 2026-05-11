@@ -16,11 +16,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -82,15 +80,6 @@ fun DiscoveryScreen() {
     var showMsgDialog    by remember { mutableStateOf(false) }
     var showPermDialog   by remember { mutableStateOf(false) }
     var downloadJob      by remember { mutableStateOf<Job?>(null) }
-    var selectedTab      by remember { mutableIntStateOf(0) }
-
-    // Pause state for Log tab
-    var logPaused  by remember { mutableStateOf(false) }
-    var frozenLog  by remember { mutableStateOf<List<EngineReverseStateHolder.EventEntry>>(emptyList()) }
-
-    LaunchedEffect(logPaused) {
-        if (logPaused) frozenLog = state.eventLog.toList()
-    }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -211,11 +200,8 @@ fun DiscoveryScreen() {
                     TextButton(onClick = {
                         showMsgDialog = false
                         val canInstall = context.packageManager.canRequestPackageInstalls()
-                        if (!canInstall) {
-                            showPermDialog = true
-                        } else {
-                            downloadAndInstall()
-                        }
+                        if (!canInstall) showPermDialog = true
+                        else downloadAndInstall()
                     }) { Text("Baixar e Instalar") }
                 } else {
                     TextButton(onClick = { showMsgDialog = false }) { Text("OK") }
@@ -248,7 +234,7 @@ fun DiscoveryScreen() {
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
 
-        // Cabeçalho
+        // ── Cabeçalho ───────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -271,7 +257,6 @@ fun DiscoveryScreen() {
                 }
             }
 
-            // Botão Update
             if (isDownloading) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(
@@ -300,38 +285,8 @@ fun DiscoveryScreen() {
             Text("v$currentVersion", color = Color(0xFF546E7A), fontSize = 11.sp)
         }
 
-        // Abas
-        TabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = Color(0xFF1A1A2E),
-            contentColor = Color(0xFF4FC3F7)
-        ) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("Chaves (${state.discoveredKeys.size})",
-                    modifier = Modifier.padding(vertical = 10.dp), fontSize = 13.sp)
-            }
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("Log (${state.eventLog.size})",
-                    modifier = Modifier.padding(vertical = 10.dp), fontSize = 13.sp)
-            }
-        }
-
-        when (selectedTab) {
-            0 -> KeysTab(
-                state = state,
-                onUnpinKey = { state.unpinKey(it) }
-            )
-            1 -> LogTab(
-                state         = state,
-                paused        = logPaused,
-                displayLog    = if (logPaused) frozenLog else state.eventLog,
-                onTogglePause = { logPaused = !logPaused },
-                onPinKey      = { key ->
-                    state.pinKey(key)
-                    selectedTab = 0
-                }
-            )
-        }
+        // ── Conteúdo ─────────────────────────────────────────────────────
+        KeysTab(state = state, onUnpinKey = { state.unpinKey(it) })
     }
 }
 
@@ -341,8 +296,8 @@ private fun KeysTab(
     state: EngineReverseStateHolder,
     onUnpinKey: (String) -> Unit
 ) {
-    val context     = LocalContext.current
-    val pinnedList  = state.pinnedKeys
+    val context       = LocalContext.current
+    val pinnedList    = state.pinnedKeys
     val sortedRegular = state.discoveredKeys.entries
         .filter { it.key !in pinnedList }
         .sortedBy { it.key }
@@ -353,7 +308,7 @@ private fun KeysTab(
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title   = { Text("Limpar tudo") },
-            text    = { Text("Apagar todas as chaves, logs e fixadas?") },
+            text    = { Text("Apagar todas as chaves e fixadas?") },
             confirmButton = {
                 TextButton(onClick = { showClearDialog = false; state.clearAll() }) {
                     Text("Limpar", color = Color(0xFFEF5350))
@@ -366,7 +321,8 @@ private fun KeysTab(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Barra de ações
+
+        // ── Barra de ações ───────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -377,7 +333,7 @@ private fun KeysTab(
             val pinnedCount = pinnedList.size
             Text(
                 buildString {
-                    append("${state.discoveredKeys.size} chaves únicas descobertas")
+                    append("${state.discoveredKeys.size} chaves descobertas")
                     if (pinnedCount > 0) append(" ($pinnedCount fixada${if (pinnedCount > 1) "s" else ""})")
                 },
                 color = Color(0xFFB0BEC5),
@@ -406,7 +362,7 @@ private fun KeysTab(
             }
         }
 
-        // Cabeçalho da tabela
+        // ── Cabeçalho da tabela ──────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -433,21 +389,15 @@ private fun KeysTab(
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "📌 FIXADAS",
-                            color = Color(0xFF81C784),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Text("📌 FIXADAS", color = Color(0xFF81C784), fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "${pinnedList.size} chave${if (pinnedList.size > 1) "s" else ""} — duplo clique para desafixar",
-                            color = Color(0xFF546E7A),
-                            fontSize = 10.sp
+                            color = Color(0xFF546E7A), fontSize = 10.sp
                         )
                     }
                 }
-
                 items(pinnedList, key = { "pin_$it" }) { key ->
                     val value   = state.discoveredKeys[key] ?: "--"
                     val lastLog = state.eventLog.firstOrNull { it.key == key }
@@ -459,43 +409,25 @@ private fun KeysTab(
                             .padding(horizontal = 12.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "📌 $key",
-                            color = Color(0xFFA5D6A7),
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            value,
-                            color = Color(0xFFE0E0E0),
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(0.25f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            lastLog?.source ?: "",
-                            color = sourceColor(lastLog?.source ?: ""),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.weight(0.15f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text("📌 $key", color = Color(0xFFA5D6A7), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.6f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(value, color = Color(0xFFE0E0E0), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.25f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(lastLog?.source ?: "", color = sourceColor(lastLog?.source ?: ""),
+                            fontSize = 9.sp, fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(0.15f), maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
                     }
                     HorizontalDivider(color = Color(0xFF1A2A1A), thickness = 0.5.dp)
                 }
-
                 item(key = "__pinned_divider__") {
                     HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 1.dp)
                 }
             }
 
-            // ── Seção regular ────────────────────────────────────────────
+            // ── Chaves regulares ─────────────────────────────────────────
             items(sortedRegular, key = { it.key }) { (key, value) ->
                 val lastLog = state.eventLog.firstOrNull { it.key == key }
                 Row(
@@ -505,132 +437,18 @@ private fun KeysTab(
                         .padding(horizontal = 12.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        key,
-                        color = Color(0xFF80CBC4),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.weight(0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        value,
-                        color = Color(0xFFE0E0E0),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.weight(0.25f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        lastLog?.source ?: "",
-                        color = sourceColor(lastLog?.source ?: ""),
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.weight(0.15f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(key, color = Color(0xFF80CBC4), fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.6f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(value, color = Color(0xFFE0E0E0), fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.25f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(lastLog?.source ?: "", color = sourceColor(lastLog?.source ?: ""),
+                        fontSize = 9.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(0.15f), maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
                 }
                 HorizontalDivider(color = Color(0xFF1E1E1E), thickness = 0.5.dp)
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun LogTab(
-    state: EngineReverseStateHolder,
-    paused: Boolean,
-    displayLog: List<EngineReverseStateHolder.EventEntry>,
-    onTogglePause: () -> Unit,
-    onPinKey: (String) -> Unit
-) {
-    val context = LocalContext.current
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Últimos ${state.eventLog.size} eventos${if (paused) " — ⏸ pausado" else ""}",
-                color = Color(0xFFB0BEC5),
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1f)
-            )
-            // Botão Pausar / Continuar
-            Button(
-                onClick = onTogglePause,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (paused) Color(0xFF1A2A1A) else Color(0xFF2A2A1A)
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (paused) Color(0x4481C784) else Color(0x44FFB74D)
-                ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    if (paused) "▶ Continuar" else "⏸ Pausar",
-                    color = if (paused) Color(0xFF81C784) else Color(0xFFFFB74D),
-                    fontSize = 11.sp
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-            Button(
-                onClick = {
-                    val text = state.eventLog.joinToString("\n") {
-                        "[${it.time}] ${it.source} | ${it.key} = ${it.value}"
-                    }
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("beantechs_log", text))
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Text("Copiar Log", fontSize = 11.sp)
-            }
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(displayLog, key = { "${it.time}-${it.key}" }) { entry ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(onClick = {}, onDoubleClick = { onPinKey(entry.key) })
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        entry.time,
-                        color = Color(0xFF546E7A),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(90.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        entry.source,
-                        color = sourceColor(entry.source),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.width(80.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "${entry.key} = ${entry.value}",
-                        color = Color(0xFFE0E0E0),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                HorizontalDivider(color = Color(0xFF1A1A1A), thickness = 0.5.dp)
             }
         }
     }
@@ -643,7 +461,7 @@ private fun sourceColor(source: String): Color = when {
     source.startsWith("empty-key")     -> Color(0xFF4FC3F7)
     source.startsWith("initial-fetch") -> Color(0xFF546E7A)
     source.startsWith("reply")         -> Color(0xFFFF8A65)
-    source.startsWith("probe")         -> Color(0xFFF48FB1)  // rosa  — S5 active probe
-    source.startsWith("apk-scan")      -> Color(0xFFFFD54F)  // ouro  — S6 APK scan
+    source.startsWith("probe")         -> Color(0xFFF48FB1)
+    source.startsWith("apk-scan")      -> Color(0xFFFFD54F)
     else                               -> Color(0xFFB0BEC5)
 }

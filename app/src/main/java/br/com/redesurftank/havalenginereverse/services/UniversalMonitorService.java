@@ -441,12 +441,25 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
 
     // ── Estratégia 6 helpers ─────────────────────────────────────────
 
-    /** Lê todos os bytes de um InputStream sem usar readAllBytes() (API < 33). */
-    private byte[] readAllBytesCompat(java.io.InputStream is) throws java.io.IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+    /** Tamanho máximo de uma entrada ZIP a ser escaneada (4 MB descomprimido). */
+    private static final long MAX_SCAN_ENTRY_BYTES = 4 * 1024 * 1024L;
+
+    /**
+     * Lê até MAX_SCAN_ENTRY_BYTES de um InputStream.
+     * Retorna null se o entry for muito grande (evita OOM em hardware limitado).
+     */
+    private byte[] readBytesLimited(java.io.InputStream is, long uncompressedSize)
+            throws java.io.IOException {
+        if (uncompressedSize > MAX_SCAN_ENTRY_BYTES) return null;
+        ByteArrayOutputStream out = new ByteArrayOutputStream(
+                uncompressedSize > 0 ? (int) uncompressedSize : 65536);
         byte[] buf = new byte[8192];
-        int n;
-        while ((n = is.read(buf)) != -1) out.write(buf, 0, n);
+        int n, total = 0;
+        while ((n = is.read(buf)) != -1) {
+            out.write(buf, 0, n);
+            total += n;
+            if (total > MAX_SCAN_ENTRY_BYTES) return null; // bail
+        }
         return out.toByteArray();
     }
 
@@ -454,6 +467,9 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
      * Varre um APK (ZIP) em busca de strings car.* / cmd.* dentro dos
      * arquivos DEX, .so e assets/ — que ficam COMPRIMIDOS no ZIP e por isso
      * não seriam encontrados com grep no binário bruto.
+     *
+     * Entradas maiores que MAX_SCAN_ENTRY_BYTES são ignoradas para não
+     * causar OOM em hardware com RAM limitada.
      */
     private void scanZipForKeys(String apkPath, Pattern pat, Set<String> out) {
         try {
@@ -467,8 +483,15 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                         || name.startsWith("assets/");
                 if (!scan) continue;
                 try (java.io.InputStream is = zip.getInputStream(entry)) {
+                    byte[] bytes = readBytesLimited(is, entry.getSize());
+                    if (bytes == null) {
+                        Log.w(TAG, "[S6] Entrada muito grande, ignorada: " + name
+                                + " (" + entry.getSize() / 1024 + " KB)");
+                        continue;
+                    }
                     // ISO-8859-1: mapeamento 1:1 byte→char — preserva bytes binários
-                    String content = new String(readAllBytesCompat(is), StandardCharsets.ISO_8859_1);
+                    String content = new String(bytes, StandardCharsets.ISO_8859_1);
+                    bytes = null; // libera referência antes do regex
                     Matcher m = pat.matcher(content);
                     while (m.find()) {
                         String key = m.group();
@@ -476,11 +499,15 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                         long dots = key.chars().filter(c -> c == '.').count();
                         if (dots >= 2 && !key.endsWith(".")) out.add(key);
                     }
+                } catch (OutOfMemoryError oom) {
+                    Log.e(TAG, "[S6] OOM ao processar " + name + " — pulando", oom);
                 } catch (Exception e) {
                     Log.v(TAG, "[S6] Entrada ignorada " + name + ": " + e.getMessage());
                 }
             }
             zip.close();
+        } catch (OutOfMemoryError oom) {
+            Log.e(TAG, "[S6] OOM ao abrir " + apkPath, oom);
         } catch (Exception e) {
             Log.w(TAG, "[S6] Erro ao abrir " + apkPath + ": " + e.getMessage());
         }
@@ -590,6 +617,10 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             EngineReverseStateHolder.INSTANCE.setConnected(true,
                     "Conectado — " + total + " chaves (" + confirmed.size() + " via APK scan)");
 
+        } catch (OutOfMemoryError oom) {
+            Log.e(TAG, "[S6] OOM durante DEX scan — abortando", oom);
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S6 abortado: memória insuficiente");
         } catch (Exception e) {
             Log.e(TAG, "[S6] Erro no DEX scan: " + e.getMessage(), e);
         }
