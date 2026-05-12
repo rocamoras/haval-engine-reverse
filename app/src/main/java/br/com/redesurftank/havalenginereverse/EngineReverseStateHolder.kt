@@ -62,8 +62,6 @@ object EngineReverseStateHolder {
         strategyStatus = status
     }
 
-    fun setProbeRunning(v: Boolean)   { probeRunning   = v }
-    fun setApkScanRunning(v: Boolean) { apkScanRunning = v }
 
     fun exportAsJson(): String {
         val sb = StringBuilder("{\n")
