@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -296,11 +297,13 @@ private fun KeysTab(
     state: EngineReverseStateHolder,
     onUnpinKey: (String) -> Unit
 ) {
-    val context       = LocalContext.current
-    val pinnedList    = state.pinnedKeys
-    val sortedRegular = state.discoveredKeys.entries
+    val context        = LocalContext.current
+    val pinnedList     = state.pinnedKeys
+    val sortedRegular  = state.discoveredKeys.entries
         .filter { it.key !in pinnedList }
         .sortedBy { it.key }
+    val probeRunning   = state.probeRunning
+    val scanRunning    = state.apkScanRunning
 
     var showClearDialog by remember { mutableStateOf(false) }
 
@@ -322,11 +325,11 @@ private fun KeysTab(
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ── Barra de ações ───────────────────────────────────────────────
+        // ── Barra de ações — linha 1: info + copiar + limpar ────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -361,6 +364,81 @@ private fun KeysTab(
                 Text("Limpar", color = Color(0xFFEF5350), fontSize = 11.sp)
             }
         }
+
+        // ── Barra de ações — linha 2: estratégias de busca ───────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Busca:", color = Color(0xFF546E7A), fontSize = 11.sp)
+
+            // S5 — Active Probe
+            Button(
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_PROBE
+                        }
+                    )
+                },
+                enabled = state.vehicleConnected && !probeRunning && !scanRunning,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (probeRunning) Color(0xFF1A1A2E) else Color(0xFF1A2A1A)
+                ),
+                border = BorderStroke(1.dp, Color(0x44F48FB1)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                if (probeRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        color = Color(0xFFF48FB1),
+                        strokeWidth = 1.5.dp
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    if (probeRunning) "Probe…" else "S5 Probe",
+                    color = Color(0xFFF48FB1),
+                    fontSize = 11.sp
+                )
+            }
+
+            // S6 — APK DEX Scan
+            Button(
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_APK_SCAN
+                        }
+                    )
+                },
+                enabled = state.vehicleConnected && !probeRunning && !scanRunning,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (scanRunning) Color(0xFF1A1A2E) else Color(0xFF2A2A10)
+                ),
+                border = BorderStroke(1.dp, Color(0x44FFD54F)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                if (scanRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        color = Color(0xFFFFD54F),
+                        strokeWidth = 1.5.dp
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    if (scanRunning) "Scan APK…" else "S6 Scan APK",
+                    color = Color(0xFFFFD54F),
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        HorizontalDivider(color = Color(0xFF1E1E2E), thickness = 1.dp)
 
         // ── Cabeçalho da tabela ──────────────────────────────────────────
         Row(

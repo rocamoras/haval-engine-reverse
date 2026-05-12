@@ -67,6 +67,11 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     private static final String PREFS_NAME      = "engine_reverse_prefs";
     private static final String KEY_SHIZUKU_LIB = "shizuku_lib_location";
 
+    public static final String ACTION_TRIGGER_PROBE    =
+            "br.com.redesurftank.havalenginereverse.TRIGGER_PROBE";
+    public static final String ACTION_TRIGGER_APK_SCAN =
+            "br.com.redesurftank.havalenginereverse.TRIGGER_APK_SCAN";
+
     /**
      * Estratégia 5 — Active Probe.
      * Candidatos a testar via fetchDatas(). Qualquer um que retorne valor não-nulo
@@ -394,8 +399,13 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
      */
     private void runActiveProbe() {
         if (controlService == null) return;
+        if (EngineReverseStateHolder.INSTANCE.getProbeRunning()) {
+            Log.w(TAG, "[S5] Probe já em andamento, ignorado.");
+            return;
+        }
+        EngineReverseStateHolder.INSTANCE.setProbeRunning(true);
         Log.w(TAG, "[S5] Iniciando probe ativo com " + PROBE_CANDIDATES.length + " candidatos...");
-        EngineReverseStateHolder.INSTANCE.setConnected(true, "Probe ativo em andamento...");
+        EngineReverseStateHolder.INSTANCE.setConnected(true, "S5: probe ativo em andamento...");
 
         List<String> discovered = new ArrayList<>();
         int batchSize = 20;
@@ -437,6 +447,7 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
         EngineReverseStateHolder.INSTANCE.setConnected(true,
                 "Conectado — " + total + " chaves (" + discovered.size() + " via probe)");
+        EngineReverseStateHolder.INSTANCE.setProbeRunning(false);
     }
 
     // ── Estratégia 6 helpers ─────────────────────────────────────────
@@ -532,6 +543,11 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
      *   5. addListenerKey + registerDataChangedListener (source "apk-scan")
      */
     private void runApkStringScan() {
+        if (EngineReverseStateHolder.INSTANCE.getApkScanRunning()) {
+            Log.w(TAG, "[S6] APK scan já em andamento, ignorado.");
+            return;
+        }
+        EngineReverseStateHolder.INSTANCE.setApkScanRunning(true);
         try {
             EngineReverseStateHolder.INSTANCE.setConnected(true,
                     "S6: varrendo DEX de pacotes Beantechs...");
@@ -623,6 +639,8 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                     "S6 abortado: memória insuficiente");
         } catch (Exception e) {
             Log.e(TAG, "[S6] Erro no DEX scan: " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setApkScanRunning(false);
         }
     }
 
@@ -637,6 +655,29 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
 
     @Override
     public synchronized int onStartCommand(Intent intent, int flags, int startId) {
+        // Trata intents de disparo manual das estratégias de busca
+        if (intent != null) {
+            String action = intent.getAction();
+            if (ACTION_TRIGGER_PROBE.equals(action)) {
+                if (controlService != null) {
+                    backgroundHandler.post(this::runActiveProbe);
+                } else {
+                    EngineReverseStateHolder.INSTANCE.setConnected(false,
+                            "Probe: serviço não conectado ainda");
+                }
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_APK_SCAN.equals(action)) {
+                if (controlService != null) {
+                    backgroundHandler.post(this::runApkStringScan);
+                } else {
+                    EngineReverseStateHolder.INSTANCE.setConnected(false,
+                            "APK Scan: serviço não conectado ainda");
+                }
+                return START_STICKY;
+            }
+        }
+
         if (isServiceRunning) {
             Log.w(TAG, "Service already running, skipping start.");
             return START_STICKY;
@@ -842,16 +883,8 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             Shizuku.addBinderDeadListener(this);
             EngineReverseStateHolder.INSTANCE.setConnected(true,
                     "Conectado — " + EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size()
-                    + " chaves iniciais — probe em 3s...");
+                    + " chaves — use os botões para buscar mais");
             Log.w(TAG, "Conectado ao barramento Beantechs com sucesso");
-
-            // Estratégia 5: probe ativo após estabilização
-            backgroundHandler.postDelayed(() -> {
-                runActiveProbe();
-                // Estratégia 6: APK scan logo após o probe (probe demora ~1-2s)
-                backgroundHandler.postDelayed(() -> runApkStringScan(), 5000);
-            }, 3000);
-
             return true;
 
         } catch (Exception e) {

@@ -54,10 +54,16 @@ object EngineReverseStateHolder {
         if (eventLog.size > 200) eventLog.removeAt(eventLog.lastIndex)
     }
 
+    var probeRunning   by mutableStateOf(false)
+    var apkScanRunning by mutableStateOf(false)
+
     fun setConnected(connected: Boolean, status: String) {
         vehicleConnected = connected
         strategyStatus = status
     }
+
+    fun setProbeRunning(v: Boolean)   { probeRunning   = v }
+    fun setApkScanRunning(v: Boolean) { apkScanRunning = v }
 
     fun exportAsJson(): String {
         val sb = StringBuilder("{\n")
