@@ -533,6 +533,51 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             }
         }
 
+        // ── Card 4: car.configure.outside_temp_display — campo livre ────
+        val outsideTempKey     = "car.configure.outside_temp_display"
+        val outsideTempCurrent = state.discoveredKeys[outsideTempKey]
+        var outsideTempInput   by remember { mutableStateOf(outsideTempCurrent ?: "") }
+
+        LaunchedEffect(outsideTempCurrent) {
+            if (outsideTempInput.isEmpty() && outsideTempCurrent != null) outsideTempInput = outsideTempCurrent
+        }
+
+        TestCard(title = outsideTempKey, currentValue = outsideTempCurrent) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = outsideTempInput,
+                    onValueChange = { outsideTempInput = it },
+                    label = { Text("Novo valor", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF2A2A3E),
+                        focusedLabelColor    = Color(0xFF4FC3F7),
+                        unfocusedLabelColor  = Color(0xFF546E7A),
+                        focusedTextColor     = Color(0xFFE0E0E0),
+                        unfocusedTextColor   = Color(0xFFE0E0E0),
+                        cursorColor          = Color(0xFF4FC3F7)
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendRequest(outsideTempKey, outsideTempInput) })
+                )
+                Button(
+                    onClick = { sendRequest(outsideTempKey, outsideTempInput) },
+                    enabled = state.vehicleConnected && outsideTempInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
+                    border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text("Enviar", color = Color(0xFF4FC3F7), fontSize = 12.sp)
+                }
+            }
+        }
+
         if (!state.vehicleConnected) {
             Text(
                 "⚠ Serviço não conectado — os botões ficam desabilitados até conectar.",
