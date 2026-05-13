@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +41,7 @@ import androidx.core.content.FileProvider
 import br.com.redesurftank.havalenginereverse.ui.theme.HavalEngineReverseTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -301,9 +303,35 @@ private fun KeysTab(
 ) {
     val context        = LocalContext.current
     val pinnedList     = state.pinnedKeys
-    val sortedRegular  = state.discoveredKeys.entries
+
+    var sortByRecent   by remember { mutableStateOf(false) }
+    var filterRecent   by remember { mutableStateOf(false) }
+
+    // Ticker que atualiza "agora" a cada 5 s enquanto o filtro estiver ativo,
+    // forçando recomposição e expirando chaves que saíram da janela de 2 min.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(filterRecent) {
+        if (filterRecent) {
+            while (true) {
+                delay(5_000)
+                now = System.currentTimeMillis()
+            }
+        }
+    }
+
+    val recentCutoff = now - 2 * 60 * 1000L
+
+    val sortedRegular = state.discoveredKeys.entries
         .filter { it.key !in pinnedList }
-        .sortedBy { it.key }
+        .let { list ->
+            if (filterRecent) list.filter { (state.lastUpdatedAt[it.key] ?: 0L) >= recentCutoff }
+            else list
+        }
+        .let { list ->
+            if (sortByRecent) list.sortedByDescending { state.lastUpdatedAt[it.key] ?: 0L }
+            else list.sortedBy { it.key }
+        }
+
     val probeRunning      = state.probeRunning
     val scanRunning       = state.apkScanRunning
     val dumpsysRunning    = state.dumpsysRunning
@@ -343,13 +371,16 @@ private fun KeysTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val pinnedCount = pinnedList.size
+            val pinnedCount  = pinnedList.size
+            val totalKeys    = state.discoveredKeys.size
+            val visibleCount = sortedRegular.size
             Text(
                 buildString {
-                    append("${state.discoveredKeys.size} chaves descobertas")
+                    append("$totalKeys chaves descobertas")
+                    if (filterRecent) append(" · $visibleCount nos últ. 2 min")
                     if (pinnedCount > 0) append(" ($pinnedCount fixada${if (pinnedCount > 1) "s" else ""})")
                 },
-                color = Color(0xFFB0BEC5),
+                color = if (filterRecent) Color(0xFFEF9A9A) else Color(0xFFB0BEC5),
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f)
             )
@@ -499,6 +530,43 @@ private fun KeysTab(
             )
         }
 
+        // ── Barra de toggles — linha 3: ordenação e filtro ──────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Exibir:", color = Color(0xFF546E7A), fontSize = 11.sp)
+
+            // Toggle: ordenar por mais recente
+            FilterToggleChip(
+                label = "⏱ Mais recentes",
+                active = sortByRecent,
+                activeColor = Color(0xFF4FC3F7),
+                onClick = { sortByRecent = !sortByRecent }
+            )
+
+            // Toggle: mostrar apenas alterados nos últimos 2 min
+            FilterToggleChip(
+                label = "🔴 Últimos 2 min",
+                active = filterRecent,
+                activeColor = Color(0xFFEF5350),
+                onClick = {
+                    filterRecent = !filterRecent
+                    if (filterRecent) now = System.currentTimeMillis()
+                }
+            )
+
+            if (filterRecent) {
+                val remaining = state.discoveredKeys.entries.count {
+                    (state.lastUpdatedAt[it.key] ?: 0L) >= recentCutoff
+                }
+                Text("$remaining visíveis", color = Color(0xFF546E7A), fontSize = 10.sp)
+            }
+        }
+
         HorizontalDivider(color = Color(0xFF1E1E2E), thickness = 1.dp)
 
         // ── Cabeçalho da tabela ──────────────────────────────────────────
@@ -508,8 +576,11 @@ private fun KeysTab(
                 .background(Color(0xFF1E1E2E))
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
-            Text("CHAVE", color = Color(0xFF546E7A), fontSize = 10.sp,
-                modifier = Modifier.weight(0.6f), fontFamily = FontFamily.Monospace)
+            val chaveLabel = if (sortByRecent) "CHAVE  ⏱▼" else "CHAVE"
+            Text(chaveLabel,
+                color = if (sortByRecent) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                fontSize = 10.sp, modifier = Modifier.weight(0.6f),
+                fontFamily = FontFamily.Monospace)
             Text("VALOR", color = Color(0xFF546E7A), fontSize = 10.sp,
                 modifier = Modifier.weight(0.25f), fontFamily = FontFamily.Monospace)
             Text("FONTE", color = Color(0xFF546E7A), fontSize = 10.sp,
@@ -590,6 +661,28 @@ private fun KeysTab(
                 HorizontalDivider(color = Color(0xFF1E1E1E), thickness = 0.5.dp)
             }
         }
+    }
+}
+
+@Composable
+private fun FilterToggleChip(
+    label: String,
+    active: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit
+) {
+    val bgColor    = if (active) activeColor.copy(alpha = 0.15f) else Color(0xFF1E1E2E)
+    val borderColor = if (active) activeColor.copy(alpha = 0.8f) else Color(0xFF2A2A3E)
+    val textColor  = if (active) activeColor else Color(0xFF546E7A)
+
+    OutlinedButton(
+        onClick = onClick,
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = bgColor),
+        border = BorderStroke(1.dp, borderColor),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Text(label, color = textColor, fontSize = 11.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
     }
 }
 

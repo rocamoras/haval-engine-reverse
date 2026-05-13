@@ -14,6 +14,9 @@ object EngineReverseStateHolder {
     // key → last value (para exibir tabela live)
     val discoveredKeys = SnapshotStateMap<String, String>()
 
+    // key → timestamp (ms) da última atualização de valor
+    val lastUpdatedAt = SnapshotStateMap<String, Long>()
+
     // log cronológico dos eventos
     val eventLog = mutableStateListOf<EventEntry>()
 
@@ -30,6 +33,7 @@ object EngineReverseStateHolder {
 
     fun clearAll() {
         discoveredKeys.clear()
+        lastUpdatedAt.clear()
         eventLog.clear()
         pinnedKeys.clear()
     }
@@ -43,6 +47,7 @@ object EngineReverseStateHolder {
 
     fun onEventReceived(key: String, value: String, source: String) {
         discoveredKeys[key] = value
+        lastUpdatedAt[key] = System.currentTimeMillis()
         val entry = EventEntry(
             time = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
                 .format(java.util.Date()),
@@ -66,7 +71,6 @@ object EngineReverseStateHolder {
         vehicleConnected = connected
         strategyStatus = status
     }
-
 
     fun exportAsJson(): String {
         val sb = StringBuilder("{\n")
