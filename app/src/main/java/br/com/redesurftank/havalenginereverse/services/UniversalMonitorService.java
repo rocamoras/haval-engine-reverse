@@ -75,6 +75,12 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     public static final String ACTION_TRIGGER_BRUTE      = "br.com.redesurftank.havalenginereverse.TRIGGER_BRUTE";
     public static final String ACTION_TRIGGER_DATA_FILES = "br.com.redesurftank.havalenginereverse.TRIGGER_DATA_FILES";
 
+    /** Envia request(action, key, value) ao serviço Beantechs. */
+    public static final String ACTION_SEND_REQUEST = "br.com.redesurftank.havalenginereverse.SEND_REQUEST";
+    public static final String EXTRA_REQ_ACTION    = "req_action";
+    public static final String EXTRA_REQ_KEY       = "req_key";
+    public static final String EXTRA_REQ_VALUE     = "req_value";
+
     /**
      * Estratégia 5 — Active Probe.
      * Candidatos a testar via fetchDatas(). Qualquer um que retorne valor não-nulo
@@ -1037,6 +1043,38 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             }
             if (ACTION_TRIGGER_DATA_FILES.equals(action)) {
                 backgroundHandler.post(this::runDataFilesScan);
+                return START_STICKY;
+            }
+            if (ACTION_SEND_REQUEST.equals(action)) {
+                String reqAction = intent.getStringExtra(EXTRA_REQ_ACTION);
+                String reqKey    = intent.getStringExtra(EXTRA_REQ_KEY);
+                String reqValue  = intent.getStringExtra(EXTRA_REQ_VALUE);
+                if (reqAction == null) reqAction = "set";
+                if (reqKey != null && !reqKey.isEmpty()) {
+                    final String fa = reqAction;
+                    final String fk = reqKey;
+                    final String fv = reqValue != null ? reqValue : "";
+                    backgroundHandler.post(() -> {
+                        try {
+                            if (controlService == null) {
+                                EngineReverseStateHolder.INSTANCE.setConnected(false,
+                                        "request: serviço não conectado");
+                                return;
+                            }
+                            controlService.request(fa, fk, fv);
+                            // Atualiza o valor local imediatamente para feedback visual
+                            EngineReverseStateHolder.INSTANCE.onEventReceived(fk, fv, "request");
+                            Log.w(TAG, "[request] " + fa + " " + fk + "=" + fv + " → ok");
+                            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                                    "request ok: " + fk + " = " + fv);
+                        } catch (Exception e) {
+                            Log.e(TAG, "[request] falhou: " + e.getMessage(), e);
+                            EngineReverseStateHolder.INSTANCE.setConnected(
+                                    controlService != null,
+                                    "Erro ao enviar: " + e.getMessage());
+                        }
+                    });
+                }
                 return START_STICKY;
             }
         }

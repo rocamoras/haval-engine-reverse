@@ -22,9 +22,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.ui.text.input.ImeAction
 import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -237,6 +241,8 @@ fun DiscoveryScreen() {
         )
     }
 
+    var selectedTab by remember { mutableIntStateOf(0) }
+
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
 
         // ── Cabeçalho ───────────────────────────────────────────────────
@@ -290,10 +296,246 @@ fun DiscoveryScreen() {
             Text("v$currentVersion", color = Color(0xFF546E7A), fontSize = 11.sp)
         }
 
+        // ── Tabs ──────────────────────────────────────────────────────────
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = Color(0xFF1A1A2E),
+            contentColor = Color(0xFF4FC3F7),
+            indicator = { tabPositions ->
+                TabRowDefaults.SecondaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                    color = Color(0xFF4FC3F7)
+                )
+            }
+        ) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = {
+                    Text(
+                        "Chaves",
+                        color = if (selectedTab == 0) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = {
+                    Text(
+                        "Testes",
+                        color = if (selectedTab == 1) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
+        }
+
         // ── Conteúdo ─────────────────────────────────────────────────────
-        KeysTab(state = state, onUnpinKey = { state.unpinKey(it) })
+        when (selectedTab) {
+            0 -> KeysTab(state = state, onUnpinKey = { state.unpinKey(it) })
+            1 -> TestsTab(state = state)
+        }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tela de Testes
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TestsTab(state: EngineReverseStateHolder) {
+    val context = LocalContext.current
+
+    fun sendRequest(key: String, value: String) {
+        context.startService(
+            Intent(context, UniversalMonitorService::class.java).apply {
+                action = UniversalMonitorService.ACTION_SEND_REQUEST
+                putExtra(UniversalMonitorService.EXTRA_REQ_KEY, key)
+                putExtra(UniversalMonitorService.EXTRA_REQ_VALUE, value)
+                // action "set" é o padrão no serviço quando EXTRA_REQ_ACTION é omitido
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+
+        Text(
+            "Enviar comandos ao serviço Beantechs",
+            color = Color(0xFF546E7A),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+
+        // ── Card 1: car.basic.engine_state — campo livre ─────────────────
+        val engineKey = "car.basic.engine_state"
+        val engineCurrent = state.discoveredKeys[engineKey]
+        var engineInput by remember { mutableStateOf(engineCurrent ?: "") }
+
+        // Sincroniza o campo se o valor chegar via listener após abrir a tela
+        LaunchedEffect(engineCurrent) {
+            if (engineInput.isEmpty() && engineCurrent != null) engineInput = engineCurrent
+        }
+
+        TestCard(title = engineKey, currentValue = engineCurrent) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = engineInput,
+                    onValueChange = { engineInput = it },
+                    label = { Text("Novo valor", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF2A2A3E),
+                        focusedLabelColor    = Color(0xFF4FC3F7),
+                        unfocusedLabelColor  = Color(0xFF546E7A),
+                        focusedTextColor     = Color(0xFFE0E0E0),
+                        unfocusedTextColor   = Color(0xFFE0E0E0),
+                        cursorColor          = Color(0xFF4FC3F7)
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendRequest(engineKey, engineInput) })
+                )
+                Button(
+                    onClick = { sendRequest(engineKey, engineInput) },
+                    enabled = state.vehicleConnected && engineInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
+                    border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text("Enviar", color = Color(0xFF4FC3F7), fontSize = 12.sp)
+                }
+            }
+        }
+
+        // ── Card 2: car.hvac.acmax_enable — toggle 0/1 ───────────────────
+        val acmaxKey     = "car.hvac.acmax_enable"
+        val acmaxCurrent = state.discoveredKeys[acmaxKey]
+        val acmaxIsOn    = acmaxCurrent == "1"
+
+        TestCard(title = acmaxKey, currentValue = acmaxCurrent) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Botão OFF
+                Button(
+                    onClick = { sendRequest(acmaxKey, "0") },
+                    enabled = state.vehicleConnected && acmaxIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor      = if (!acmaxIsOn) Color(0xFF1A2A3A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A2A3A)
+                    ),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (!acmaxIsOn) Color(0xFF4FC3F7) else Color(0xFF2A2A3E)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "0  —  Off",
+                        color = if (!acmaxIsOn) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (!acmaxIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+
+                // Botão ON
+                Button(
+                    onClick = { sendRequest(acmaxKey, "1") },
+                    enabled = state.vehicleConnected && !acmaxIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor      = if (acmaxIsOn) Color(0xFF1A3A2A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A3A2A)
+                    ),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (acmaxIsOn) Color(0xFF81C784) else Color(0xFF2A2A3E)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "1  —  On",
+                        color = if (acmaxIsOn) Color(0xFF81C784) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (acmaxIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        if (!state.vehicleConnected) {
+            Text(
+                "⚠ Serviço não conectado — os botões ficam desabilitados até conectar.",
+                color = Color(0xFFFFB74D),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TestCard(
+    title: String,
+    currentValue: String?,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E)),
+        border = BorderStroke(1.dp, Color(0xFF2A2A3E)),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Título — nome da propriedade
+            Text(
+                title,
+                color = Color(0xFF80CBC4),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+            // Valor atual
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Valor atual: ", color = Color(0xFF546E7A), fontSize = 11.sp)
+                Text(
+                    currentValue ?: "—  (desconhecido)",
+                    color = if (currentValue != null) Color(0xFFE0E0E0) else Color(0xFF3A3A4E),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 0.5.dp)
+            // Conteúdo específico do card
+            content()
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aba de Chaves (grid de descoberta)
+// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -736,5 +978,6 @@ private fun sourceColor(source: String): Color = when {
     source.startsWith("services")      -> Color(0xFFCE93D8)
     source.startsWith("brute")         -> Color(0xFFFFB74D)
     source.startsWith("data-files")    -> Color(0xFF80DEEA)
+    source.startsWith("request")       -> Color(0xFFFFCC80)
     else                               -> Color(0xFFB0BEC5)
 }
