@@ -300,13 +300,7 @@ fun DiscoveryScreen() {
         TabRow(
             selectedTabIndex = selectedTab,
             containerColor = Color(0xFF1A1A2E),
-            contentColor = Color(0xFF4FC3F7),
-            indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = Color(0xFF4FC3F7)
-                )
-            }
+            contentColor = Color(0xFF4FC3F7)
         ) {
             Tab(
                 selected = selectedTab == 0,
