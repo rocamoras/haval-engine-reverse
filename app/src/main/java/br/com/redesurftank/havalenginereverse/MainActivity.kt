@@ -480,6 +480,65 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             }
         }
 
+        // ── Card 3: car.configure.seat_belt_warning — toggle 0/1 ────────
+        val seatBeltKey     = "car.configure.seat_belt_warning"
+        val seatBeltCurrent = state.discoveredKeys[seatBeltKey]
+        val seatBeltIsOn    = seatBeltCurrent == "1"
+
+        TestCard(title = seatBeltKey, currentValue = seatBeltCurrent) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Botão OFF
+                Button(
+                    onClick = { sendRequest(seatBeltKey, "0") },
+                    enabled = state.vehicleConnected && seatBeltIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor         = if (!seatBeltIsOn) Color(0xFF1A2A3A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A2A3A)
+                    ),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (!seatBeltIsOn) Color(0xFF4FC3F7) else Color(0xFF2A2A3E)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "0  —  Off",
+                        color = if (!seatBeltIsOn) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (!seatBeltIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+
+                // Botão ON
+                Button(
+                    onClick = { sendRequest(seatBeltKey, "1") },
+                    enabled = state.vehicleConnected && !seatBeltIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor         = if (seatBeltIsOn) Color(0xFF1A3A2A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A3A2A)
+                    ),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (seatBeltIsOn) Color(0xFF81C784) else Color(0xFF2A2A3E)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "1  —  On",
+                        color = if (seatBeltIsOn) Color(0xFF81C784) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (seatBeltIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
         if (!state.vehicleConnected) {
             Text(
                 "⚠ Serviço não conectado — os botões ficam desabilitados até conectar.",
