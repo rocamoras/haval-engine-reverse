@@ -67,10 +67,13 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     private static final String PREFS_NAME      = "engine_reverse_prefs";
     private static final String KEY_SHIZUKU_LIB = "shizuku_lib_location";
 
-    public static final String ACTION_TRIGGER_PROBE    =
-            "br.com.redesurftank.havalenginereverse.TRIGGER_PROBE";
-    public static final String ACTION_TRIGGER_APK_SCAN =
-            "br.com.redesurftank.havalenginereverse.TRIGGER_APK_SCAN";
+    public static final String ACTION_TRIGGER_PROBE      = "br.com.redesurftank.havalenginereverse.TRIGGER_PROBE";
+    public static final String ACTION_TRIGGER_APK_SCAN   = "br.com.redesurftank.havalenginereverse.TRIGGER_APK_SCAN";
+    public static final String ACTION_TRIGGER_DUMPSYS    = "br.com.redesurftank.havalenginereverse.TRIGGER_DUMPSYS";
+    public static final String ACTION_TRIGGER_LOGCAT     = "br.com.redesurftank.havalenginereverse.TRIGGER_LOGCAT";
+    public static final String ACTION_TRIGGER_SERVICES   = "br.com.redesurftank.havalenginereverse.TRIGGER_SERVICES";
+    public static final String ACTION_TRIGGER_BRUTE      = "br.com.redesurftank.havalenginereverse.TRIGGER_BRUTE";
+    public static final String ACTION_TRIGGER_DATA_FILES = "br.com.redesurftank.havalenginereverse.TRIGGER_DATA_FILES";
 
     /**
      * Estratégia 5 — Active Probe.
@@ -644,6 +647,349 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         }
     }
 
+    // ── Listeners S7-S11 ─────────────────────────────────────────────
+
+    private final IListener dumpsysListener = new IListener.Stub() {
+        @Override public void onDataChanged(String k, String v) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(k, v, "dumpsys"); }
+    };
+    private final IListener logcatListener = new IListener.Stub() {
+        @Override public void onDataChanged(String k, String v) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(k, v, "logcat"); }
+    };
+    private final IListener servicesListener = new IListener.Stub() {
+        @Override public void onDataChanged(String k, String v) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(k, v, "services"); }
+    };
+    private final IListener bruteListener = new IListener.Stub() {
+        @Override public void onDataChanged(String k, String v) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(k, v, "brute"); }
+    };
+    private final IListener dataFilesListener = new IListener.Stub() {
+        @Override public void onDataChanged(String k, String v) {
+            EngineReverseStateHolder.INSTANCE.onEventReceived(k, v, "data-files"); }
+    };
+
+    // ── Helpers compartilhados ────────────────────────────────────────
+
+    /**
+     * Executa um comando shell via telnet (Shizuku), gravando a saída em
+     * arquivo temporário para suportar outputs grandes sem timeout.
+     * Retorna string vazia em caso de erro.
+     */
+    private String runShell(String cmd, long timeoutMs) {
+        TelnetClientWrapper telnet = null;
+        try {
+            telnet = new TelnetClientWrapper();
+            telnet.connect("127.0.0.1", 23);
+            String tmp = "/data/local/tmp/bk_out.txt";
+            telnet.executeCommand(cmd + " > " + tmp + " 2>/dev/null; echo ok", timeoutMs);
+            String result = telnet.executeCommand("cat " + tmp + " 2>/dev/null", 10000);
+            telnet.executeCommand("rm " + tmp + " 2>/dev/null");
+            return result;
+        } catch (Exception e) {
+            Log.w(TAG, "runShell failed: " + e.getMessage());
+            return "";
+        } finally {
+            if (telnet != null) try { telnet.disconnect(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Extrai chaves no padrão car.x.y ou cmd.x.y de qualquer texto. */
+    private List<String> extractKeys(String text) {
+        Pattern pat = Pattern.compile("(?:car|cmd)\\.[a-zA-Z_][a-zA-Z0-9_.]{2,60}");
+        Set<String> found = new TreeSet<>();
+        Matcher m = pat.matcher(text);
+        while (m.find()) {
+            String k = m.group();
+            if (k.chars().filter(c -> c == '.').count() >= 2 && !k.endsWith("."))
+                found.add(k);
+        }
+        return new ArrayList<>(found);
+    }
+
+    /**
+     * Filtra candidatos não conhecidos, confirma via fetchDatas em lote,
+     * reporta os confirmados e registra listener para receber mudanças.
+     */
+    private List<String> probeAndRegister(List<String> candidates,
+            String pkgSuffix, String source, IListener listener) {
+        List<String> newOnly = new ArrayList<>();
+        for (String k : candidates) {
+            if (!EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().containsKey(k))
+                newOnly.add(k);
+        }
+        if (newOnly.isEmpty() || controlService == null) return new ArrayList<>();
+
+        List<String> confirmed = new ArrayList<>();
+        for (int i = 0; i < newOnly.size(); i += 20) {
+            if (controlService == null) break;
+            List<String> batch = newOnly.subList(i, Math.min(i + 20, newOnly.size()));
+            try {
+                String[] vals = controlService.fetchDatas(batch.toArray(new String[0]));
+                if (vals != null) {
+                    for (int j = 0; j < batch.size() && j < vals.length; j++) {
+                        if (vals[j] != null && !vals[j].isEmpty()) {
+                            confirmed.add(batch.get(j));
+                            EngineReverseStateHolder.INSTANCE.onEventReceived(
+                                    batch.get(j), vals[j], source);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "[" + pkgSuffix + "] batch fetch: " + e.getMessage());
+            }
+        }
+        if (!confirmed.isEmpty() && controlService != null) {
+            try {
+                controlService.addListenerKey(getPackageName() + pkgSuffix,
+                        confirmed.toArray(new String[0]));
+                controlService.registerDataChangedListener(
+                        getPackageName() + pkgSuffix, listener);
+            } catch (Exception e) {
+                Log.w(TAG, "[" + pkgSuffix + "] listener reg: " + e.getMessage());
+            }
+        }
+        return confirmed;
+    }
+
+    // ── Estratégia 7 — Dumpsys ───────────────────────────────────────
+
+    /**
+     * Chama `dumpsys com.beantechs.intelligentvehiclecontrol`.
+     * Se o serviço implementar dump(), o output contém estado interno completo
+     * com pares chave=valor. Extrai os pares direto e proba o restante.
+     */
+    private void runDumpsys() {
+        if (EngineReverseStateHolder.INSTANCE.getDumpsysRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setDumpsysRunning(true);
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S7: dumpsys...");
+            String out = runShell("dumpsys com.beantechs.intelligentvehiclecontrol", 15000);
+            if (out.isEmpty()) {
+                EngineReverseStateHolder.INSTANCE.setConnected(true, "S7: sem saída do dumpsys");
+                return;
+            }
+            // Extrai pares explícitos key=value / key: value
+            Pattern kvPat = Pattern.compile(
+                    "((?:car|cmd)\\.[a-zA-Z_][a-zA-Z0-9_.]{2,60})\\s*[=:]\\s*([^\\n\\r]{1,120})");
+            Set<String> kvKeys = new HashSet<>();
+            Matcher kv = kvPat.matcher(out);
+            while (kv.find()) {
+                String key = kv.group(1);
+                String val = kv.group(2).trim();
+                EngineReverseStateHolder.INSTANCE.onEventReceived(key, val, "dumpsys");
+                kvKeys.add(key);
+            }
+            // Proba chaves mencionadas sem valor explícito
+            List<String> rest = extractKeys(out);
+            rest.removeAll(kvKeys);
+            List<String> confirmed = probeAndRegister(rest, ".dumpsys", "dumpsys", dumpsysListener);
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S7 ok — " + total + " chaves (" + (kvKeys.size() + confirmed.size()) + " via dumpsys)");
+        } catch (Exception e) {
+            Log.e(TAG, "[S7] " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setDumpsysRunning(false);
+        }
+    }
+
+    // ── Estratégia 8 — Logcat Scan ───────────────────────────────────
+
+    /**
+     * Varre os logs recentes (logcat -d) em busca de qualquer menção a car.*
+     * O serviço Beantechs frequentemente loga chaves ao processar eventos CAN.
+     * Quanto mais o usuário interagir com o painel antes de apertar o botão,
+     * mais chaves aparecem no log.
+     */
+    private void runLogcatScan() {
+        if (EngineReverseStateHolder.INSTANCE.getLogcatRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setLogcatRunning(true);
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S8: varrendo logcat...");
+            String out = runShell(
+                "logcat -d 2>/dev/null | grep -o 'car\\.[a-zA-Z_][a-zA-Z0-9_.]*' | sort -u",
+                20000);
+            if (out.isEmpty()) {
+                EngineReverseStateHolder.INSTANCE.setConnected(true, "S8: nada no logcat");
+                return;
+            }
+            List<String> candidates = extractKeys(out);
+            List<String> confirmed = probeAndRegister(candidates, ".logcat", "logcat", logcatListener);
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S8 ok — " + total + " chaves (" + confirmed.size() + " via logcat)");
+        } catch (Exception e) {
+            Log.e(TAG, "[S8] " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setLogcatRunning(false);
+        }
+    }
+
+    // ── Estratégia 9 — Enumeração de serviços ────────────────────────
+
+    /**
+     * Lista todos os serviços registrados no ServiceManager e tenta conectar
+     * aos que contêm "beantechs" no nome (exceto o que já estamos conectados).
+     * Para cada serviço encontrado, tenta usar a mesma interface AIDL e faz
+     * fetchDatas com os candidatos conhecidos.
+     */
+    private void runServiceEnum() {
+        if (EngineReverseStateHolder.INSTANCE.getServicesRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setServicesRunning(true);
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S9: enumerando serviços...");
+            String out = runShell("service list 2>/dev/null | grep -i beantechs", 8000);
+            if (out.isEmpty()) {
+                EngineReverseStateHolder.INSTANCE.setConnected(true, "S9: nenhum serviço extra encontrado");
+                return;
+            }
+            int newKeys = 0;
+            for (String line : out.split("\n")) {
+                // Formato: "N  nome.do.servico: [interface]"
+                String svcName = line.replaceAll("^\\d+\\s+", "").replaceAll(":.*", "").trim();
+                if (svcName.isEmpty() || svcName.equals("com.beantechs.intelligentvehiclecontrol"))
+                    continue;
+                Log.w(TAG, "[S9] Tentando serviço: " + svcName);
+                try {
+                    IBinder raw = getServiceBinder(svcName);
+                    IBinder wrapped = new ShizukuBinderWrapper(raw);
+                    if (!wrapped.pingBinder()) continue;
+                    IIntelligentVehicleControlService svc =
+                            IIntelligentVehicleControlService.Stub.asInterface(wrapped);
+                    // Testa com todos os candidatos conhecidos
+                    List<String> allCandidates = new ArrayList<>(Arrays.asList(KNOWN_PROPS));
+                    allCandidates.addAll(Arrays.asList(PROBE_CANDIDATES));
+                    for (int i = 0; i < allCandidates.size(); i += 20) {
+                        List<String> batch = allCandidates.subList(i,
+                                Math.min(i + 20, allCandidates.size()));
+                        try {
+                            String[] vals = svc.fetchDatas(batch.toArray(new String[0]));
+                            if (vals != null) {
+                                for (int j = 0; j < batch.size() && j < vals.length; j++) {
+                                    if (vals[j] != null && !vals[j].isEmpty()) {
+                                        EngineReverseStateHolder.INSTANCE.onEventReceived(
+                                                batch.get(j), vals[j], "services:" + svcName);
+                                        newKeys++;
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "[S9] " + svcName + " falhou: " + e.getMessage());
+                }
+            }
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S9 ok — " + total + " chaves (" + newKeys + " via serviços extras)");
+        } catch (Exception e) {
+            Log.e(TAG, "[S9] " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setServicesRunning(false);
+        }
+    }
+
+    // ── Estratégia 10 — Brute force de transaction codes ────────────
+
+    /**
+     * Tenta transaction codes além dos 6 conhecidos (7 a 20).
+     * Analisa os bytes de cada resposta em busca de strings car.*.
+     * Pode revelar métodos não documentados como listAllKeys(), getPropertyCount(), etc.
+     */
+    private void runTransactBrute() {
+        if (EngineReverseStateHolder.INSTANCE.getBruteRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setBruteRunning(true);
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S10: brute force de códigos...");
+            IBinder binder = controlService.asBinder();
+            String descriptor = binder.getInterfaceDescriptor();
+            Set<String> found = new TreeSet<>();
+
+            for (int code = IBinder.FIRST_CALL_TRANSACTION + 6;
+                 code <= IBinder.FIRST_CALL_TRANSACTION + 20; code++) {
+                // Variação 1: só o token de interface
+                tryTransact(binder, descriptor, code, null, found);
+                // Variação 2: token + nome do package
+                tryTransact(binder, descriptor, code, getPackageName(), found);
+                // Variação 3: token + prefixo "car."
+                tryTransact(binder, descriptor, code, "car.", found);
+            }
+            List<String> confirmed = probeAndRegister(new ArrayList<>(found), ".brute", "brute", bruteListener);
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S10 ok — " + total + " chaves (" + confirmed.size() + " via brute)");
+        } catch (Exception e) {
+            Log.e(TAG, "[S10] " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setBruteRunning(false);
+        }
+    }
+
+    private void tryTransact(IBinder binder, String descriptor, int code,
+                              String extraStr, Set<String> out) {
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(descriptor);
+            if (extraStr != null) data.writeString(extraStr);
+            binder.transact(code, data, reply, 0);
+            byte[] bytes = reply.marshall();
+            if (bytes != null && bytes.length > 0) {
+                String content = new String(bytes, StandardCharsets.ISO_8859_1);
+                out.addAll(extractKeys(content));
+            }
+        } catch (Exception ignored) {
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    // ── Estratégia 11 — Arquivos de dados do app ─────────────────────
+
+    /**
+     * Lê SharedPreferences e arquivos de assets do Beantechs em busca de
+     * definições de chaves. SharedPreferences XML frequentemente contém
+     * listas de propriedades configuradas no sistema.
+     */
+    private void runDataFilesScan() {
+        if (EngineReverseStateHolder.INSTANCE.getDataFilesRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setDataFilesRunning(true);
+        try {
+            EngineReverseStateHolder.INSTANCE.setConnected(true, "S11: lendo arquivos de dados...");
+            String dataDir = "/data/data/com.beantechs.intelligentvehiclecontrol";
+            // Lê SharedPreferences XML
+            String prefs = runShell("cat " + dataDir + "/shared_prefs/*.xml 2>/dev/null", 15000);
+            // Lê arquivos em databases (dump strings de SQLite)
+            String db = runShell(
+                "find " + dataDir + "/databases -type f 2>/dev/null | " +
+                "xargs grep -oa 'car\\.[a-zA-Z_][a-zA-Z0-9_.]*' 2>/dev/null | sort -u",
+                20000);
+            // Lê assets dentro do APK (já extraído pelo S6, mas aqui via shell)
+            String assets = runShell(
+                "find " + dataDir + " -name '*.json' -o -name '*.xml' -o -name '*.conf' " +
+                "2>/dev/null | xargs cat 2>/dev/null | grep -o 'car\\.[a-zA-Z_][a-zA-Z0-9_.]*' | sort -u",
+                15000);
+
+            String combined = prefs + "\n" + db + "\n" + assets;
+            if (combined.trim().isEmpty()) {
+                EngineReverseStateHolder.INSTANCE.setConnected(true, "S11: sem arquivos acessíveis");
+                return;
+            }
+            List<String> candidates = extractKeys(combined);
+            List<String> confirmed = probeAndRegister(candidates, ".datafiles", "data-files", dataFilesListener);
+            int total = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size();
+            EngineReverseStateHolder.INSTANCE.setConnected(true,
+                    "S11 ok — " + total + " chaves (" + confirmed.size() + " via arquivos)");
+        } catch (Exception e) {
+            Log.e(TAG, "[S11] " + e.getMessage(), e);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setDataFilesRunning(false);
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -668,12 +1014,29 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 return START_STICKY;
             }
             if (ACTION_TRIGGER_APK_SCAN.equals(action)) {
-                if (controlService != null) {
-                    backgroundHandler.post(this::runApkStringScan);
-                } else {
-                    EngineReverseStateHolder.INSTANCE.setConnected(false,
-                            "APK Scan: serviço não conectado ainda");
-                }
+                if (controlService != null) backgroundHandler.post(this::runApkStringScan);
+                else EngineReverseStateHolder.INSTANCE.setConnected(false, "APK Scan: não conectado");
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_DUMPSYS.equals(action)) {
+                backgroundHandler.post(this::runDumpsys);
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_LOGCAT.equals(action)) {
+                backgroundHandler.post(this::runLogcatScan);
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_SERVICES.equals(action)) {
+                backgroundHandler.post(this::runServiceEnum);
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_BRUTE.equals(action)) {
+                if (controlService != null) backgroundHandler.post(this::runTransactBrute);
+                else EngineReverseStateHolder.INSTANCE.setConnected(false, "Brute: não conectado");
+                return START_STICKY;
+            }
+            if (ACTION_TRIGGER_DATA_FILES.equals(action)) {
+                backgroundHandler.post(this::runDataFilesScan);
                 return START_STICKY;
             }
         }

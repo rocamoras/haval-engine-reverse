@@ -54,8 +54,13 @@ object EngineReverseStateHolder {
         if (eventLog.size > 200) eventLog.removeAt(eventLog.lastIndex)
     }
 
-    var probeRunning   by mutableStateOf(false)
-    var apkScanRunning by mutableStateOf(false)
+    var probeRunning      by mutableStateOf(false)
+    var apkScanRunning    by mutableStateOf(false)
+    var dumpsysRunning    by mutableStateOf(false)
+    var logcatRunning     by mutableStateOf(false)
+    var servicesRunning   by mutableStateOf(false)
+    var bruteRunning      by mutableStateOf(false)
+    var dataFilesRunning  by mutableStateOf(false)
 
     fun setConnected(connected: Boolean, status: String) {
         vehicleConnected = connected

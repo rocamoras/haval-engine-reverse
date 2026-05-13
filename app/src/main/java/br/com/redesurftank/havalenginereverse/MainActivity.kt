@@ -16,9 +16,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -302,8 +304,16 @@ private fun KeysTab(
     val sortedRegular  = state.discoveredKeys.entries
         .filter { it.key !in pinnedList }
         .sortedBy { it.key }
-    val probeRunning   = state.probeRunning
-    val scanRunning    = state.apkScanRunning
+    val probeRunning      = state.probeRunning
+    val scanRunning       = state.apkScanRunning
+    val dumpsysRunning    = state.dumpsysRunning
+    val logcatRunning     = state.logcatRunning
+    val servicesRunning   = state.servicesRunning
+    val bruteRunning      = state.bruteRunning
+    val dataFilesRunning  = state.dataFilesRunning
+
+    val anyRunning = probeRunning || scanRunning || dumpsysRunning ||
+            logcatRunning || servicesRunning || bruteRunning || dataFilesRunning
 
     var showClearDialog by remember { mutableStateOf(false) }
 
@@ -369,73 +379,124 @@ private fun KeysTab(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text("Busca:", color = Color(0xFF546E7A), fontSize = 11.sp)
 
             // S5 — Active Probe
-            Button(
+            StrategyButton(
+                label = "S5 Probe", runningLabel = "Probe…",
+                isRunning = probeRunning,
+                enabled = state.vehicleConnected && !anyRunning,
+                accentColor = Color(0xFFF48FB1),
+                containerColor = Color(0xFF1A2A1A),
                 onClick = {
                     context.startService(
                         Intent(context, UniversalMonitorService::class.java).apply {
                             action = UniversalMonitorService.ACTION_TRIGGER_PROBE
                         }
                     )
-                },
-                enabled = state.vehicleConnected && !probeRunning && !scanRunning,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (probeRunning) Color(0xFF1A1A2E) else Color(0xFF1A2A1A)
-                ),
-                border = BorderStroke(1.dp, Color(0x44F48FB1)),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                if (probeRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(12.dp),
-                        color = Color(0xFFF48FB1),
-                        strokeWidth = 1.5.dp
-                    )
-                    Spacer(Modifier.width(4.dp))
                 }
-                Text(
-                    if (probeRunning) "Probe…" else "S5 Probe",
-                    color = Color(0xFFF48FB1),
-                    fontSize = 11.sp
-                )
-            }
+            )
 
             // S6 — APK DEX Scan
-            Button(
+            StrategyButton(
+                label = "S6 Scan APK", runningLabel = "Scan APK…",
+                isRunning = scanRunning,
+                enabled = state.vehicleConnected && !anyRunning,
+                accentColor = Color(0xFFFFD54F),
+                containerColor = Color(0xFF2A2A10),
                 onClick = {
                     context.startService(
                         Intent(context, UniversalMonitorService::class.java).apply {
                             action = UniversalMonitorService.ACTION_TRIGGER_APK_SCAN
                         }
                     )
-                },
-                enabled = state.vehicleConnected && !probeRunning && !scanRunning,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (scanRunning) Color(0xFF1A1A2E) else Color(0xFF2A2A10)
-                ),
-                border = BorderStroke(1.dp, Color(0x44FFD54F)),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                if (scanRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(12.dp),
-                        color = Color(0xFFFFD54F),
-                        strokeWidth = 1.5.dp
-                    )
-                    Spacer(Modifier.width(4.dp))
                 }
-                Text(
-                    if (scanRunning) "Scan APK…" else "S6 Scan APK",
-                    color = Color(0xFFFFD54F),
-                    fontSize = 11.sp
-                )
-            }
+            )
+
+            // S7 — Dumpsys
+            StrategyButton(
+                label = "S7 Dumpsys", runningLabel = "Dumpsys…",
+                isRunning = dumpsysRunning,
+                enabled = !anyRunning,
+                accentColor = Color(0xFF4FC3F7),
+                containerColor = Color(0xFF0D2030),
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_DUMPSYS
+                        }
+                    )
+                }
+            )
+
+            // S8 — Logcat Scan
+            StrategyButton(
+                label = "S8 Logcat", runningLabel = "Logcat…",
+                isRunning = logcatRunning,
+                enabled = !anyRunning,
+                accentColor = Color(0xFFA5D6A7),
+                containerColor = Color(0xFF0D1F0D),
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_LOGCAT
+                        }
+                    )
+                }
+            )
+
+            // S9 — Enumeração de serviços
+            StrategyButton(
+                label = "S9 Serviços", runningLabel = "Serviços…",
+                isRunning = servicesRunning,
+                enabled = !anyRunning,
+                accentColor = Color(0xFFCE93D8),
+                containerColor = Color(0xFF1A0D2E),
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_SERVICES
+                        }
+                    )
+                }
+            )
+
+            // S10 — Brute force de transaction codes
+            StrategyButton(
+                label = "S10 Brute", runningLabel = "Brute…",
+                isRunning = bruteRunning,
+                enabled = state.vehicleConnected && !anyRunning,
+                accentColor = Color(0xFFFFB74D),
+                containerColor = Color(0xFF2A1A0D),
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_BRUTE
+                        }
+                    )
+                }
+            )
+
+            // S11 — Arquivos de dados do app
+            StrategyButton(
+                label = "S11 Arquivos", runningLabel = "Arquivos…",
+                isRunning = dataFilesRunning,
+                enabled = !anyRunning,
+                accentColor = Color(0xFF80DEEA),
+                containerColor = Color(0xFF0D1F1F),
+                onClick = {
+                    context.startService(
+                        Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_TRIGGER_DATA_FILES
+                        }
+                    )
+                }
+            )
         }
 
         HorizontalDivider(color = Color(0xFF1E1E2E), thickness = 1.dp)
@@ -532,6 +593,42 @@ private fun KeysTab(
     }
 }
 
+@Composable
+private fun StrategyButton(
+    label: String,
+    runningLabel: String,
+    isRunning: Boolean,
+    enabled: Boolean,
+    accentColor: Color,
+    containerColor: Color,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled && !isRunning,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isRunning) Color(0xFF1A1A2E) else containerColor,
+            disabledContainerColor = if (isRunning) Color(0xFF1A1A2E) else containerColor.copy(alpha = 0.5f)
+        ),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        if (isRunning) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                color = accentColor,
+                strokeWidth = 1.5.dp
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(
+            if (isRunning) runningLabel else label,
+            color = accentColor,
+            fontSize = 11.sp
+        )
+    }
+}
+
 private fun sourceColor(source: String): Color = when {
     source.startsWith("listener")      -> Color(0xFF81C784)
     source.startsWith("raw-transact")  -> Color(0xFFFFB74D)
@@ -541,5 +638,10 @@ private fun sourceColor(source: String): Color = when {
     source.startsWith("reply")         -> Color(0xFFFF8A65)
     source.startsWith("probe")         -> Color(0xFFF48FB1)
     source.startsWith("apk-scan")      -> Color(0xFFFFD54F)
+    source.startsWith("dumpsys")       -> Color(0xFF4FC3F7)
+    source.startsWith("logcat")        -> Color(0xFFA5D6A7)
+    source.startsWith("services")      -> Color(0xFFCE93D8)
+    source.startsWith("brute")         -> Color(0xFFFFB74D)
+    source.startsWith("data-files")    -> Color(0xFF80DEEA)
     else                               -> Color(0xFFB0BEC5)
 }
