@@ -578,6 +578,56 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             }
         }
 
+        // ── Card 5: car.ev.setting.wade_mode_enable — toggle 0/1 ────────
+        val wadeModeKey     = "car.ev.setting.wade_mode_enable"
+        val wadeModeCurrent = state.discoveredKeys[wadeModeKey]
+        val wadeModeIsOn    = wadeModeCurrent == "1"
+
+        TestCard(title = wadeModeKey, currentValue = wadeModeCurrent) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = { sendRequest(wadeModeKey, "0") },
+                    enabled = state.vehicleConnected && wadeModeIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor         = if (!wadeModeIsOn) Color(0xFF1A2A3A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A2A3A)
+                    ),
+                    border = BorderStroke(1.5.dp, if (!wadeModeIsOn) Color(0xFF4FC3F7) else Color(0xFF2A2A3E)),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "0  —  Off",
+                        color = if (!wadeModeIsOn) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (!wadeModeIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+                Button(
+                    onClick = { sendRequest(wadeModeKey, "1") },
+                    enabled = state.vehicleConnected && !wadeModeIsOn,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor         = if (wadeModeIsOn) Color(0xFF1A3A2A) else Color(0xFF1E1E2E),
+                        disabledContainerColor = Color(0xFF1A3A2A)
+                    ),
+                    border = BorderStroke(1.5.dp, if (wadeModeIsOn) Color(0xFF81C784) else Color(0xFF2A2A3E)),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        "1  —  On",
+                        color = if (wadeModeIsOn) Color(0xFF81C784) else Color(0xFF546E7A),
+                        fontSize = 13.sp,
+                        fontWeight = if (wadeModeIsOn) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
         if (!state.vehicleConnected) {
             Text(
                 "⚠ Serviço não conectado — os botões ficam desabilitados até conectar.",
