@@ -342,15 +342,21 @@ fun DiscoveryScreen() {
 private fun TestsTab(state: EngineReverseStateHolder) {
     val context = LocalContext.current
 
-    fun sendRequest(key: String, value: String) {
+    // Registra o último envio por chave: key → "HH:mm:ss  action=X  value=Y"
+    val sentLog = remember { androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>() }
+
+    fun sendRequest(key: String, value: String, reqAction: String = "set") {
         context.startService(
             Intent(context, UniversalMonitorService::class.java).apply {
                 action = UniversalMonitorService.ACTION_SEND_REQUEST
+                putExtra(UniversalMonitorService.EXTRA_REQ_ACTION, reqAction)
                 putExtra(UniversalMonitorService.EXTRA_REQ_KEY, key)
                 putExtra(UniversalMonitorService.EXTRA_REQ_VALUE, value)
-                // action "set" é o padrão no serviço quando EXTRA_REQ_ACTION é omitido
             }
         )
+        val ts = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        sentLog[key] = "$ts  action=$reqAction  valor=$value"
     }
 
     Column(
@@ -379,7 +385,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             if (engineInput.isEmpty() && engineCurrent != null) engineInput = engineCurrent
         }
 
-        TestCard(title = engineKey, currentValue = engineCurrent) {
+        TestCard(title = engineKey, currentValue = engineCurrent, sentInfo = sentLog[engineKey]) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -420,7 +426,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
         val acmaxCurrent = state.discoveredKeys[acmaxKey]
         val acmaxIsOn    = acmaxCurrent == "1"
 
-        TestCard(title = acmaxKey, currentValue = acmaxCurrent) {
+        TestCard(title = acmaxKey, currentValue = acmaxCurrent, sentInfo = sentLog[acmaxKey]) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -479,7 +485,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
         val seatBeltCurrent = state.discoveredKeys[seatBeltKey]
         val seatBeltIsOn    = seatBeltCurrent == "1"
 
-        TestCard(title = seatBeltKey, currentValue = seatBeltCurrent) {
+        TestCard(title = seatBeltKey, currentValue = seatBeltCurrent, sentInfo = sentLog[seatBeltKey]) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -542,7 +548,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             if (outsideTempInput.isEmpty() && outsideTempCurrent != null) outsideTempInput = outsideTempCurrent
         }
 
-        TestCard(title = outsideTempKey, currentValue = outsideTempCurrent) {
+        TestCard(title = outsideTempKey, currentValue = outsideTempCurrent, sentInfo = sentLog[outsideTempKey]) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -583,7 +589,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
         val wadeModeCurrent = state.discoveredKeys[wadeModeKey]
         val wadeModeIsOn    = wadeModeCurrent == "1"
 
-        TestCard(title = wadeModeKey, currentValue = wadeModeCurrent) {
+        TestCard(title = wadeModeKey, currentValue = wadeModeCurrent, sentInfo = sentLog[wadeModeKey]) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -643,6 +649,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
 private fun TestCard(
     title: String,
     currentValue: String?,
+    sentInfo: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
@@ -673,6 +680,15 @@ private fun TestCard(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold
                 )
+            }
+            // Feedback do último envio
+            if (sentInfo != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("✓ Enviado: ", color = Color(0xFF81C784), fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold)
+                    Text(sentInfo, color = Color(0xFF81C784), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
             }
             HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 0.5.dp)
             // Conteúdo específico do card
