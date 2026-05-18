@@ -23,6 +23,9 @@ object EngineReverseStateHolder {
     // chaves fixadas pelo usuário (aparecem no topo da aba Chaves)
     val pinnedKeys = mutableStateListOf<String>()
 
+    // chaves ignoradas pelo usuário (não recebem mais updates, aparecem no fim)
+    val ignoredKeys = mutableStateListOf<String>()
+
     fun pinKey(key: String) {
         if (!pinnedKeys.contains(key)) pinnedKeys.add(0, key)
     }
@@ -31,11 +34,21 @@ object EngineReverseStateHolder {
         pinnedKeys.remove(key)
     }
 
+    fun ignoreKey(key: String) {
+        unpinKey(key)
+        if (!ignoredKeys.contains(key)) ignoredKeys.add(key)
+    }
+
+    fun unignoreKey(key: String) {
+        ignoredKeys.remove(key)
+    }
+
     fun clearAll() {
         discoveredKeys.clear()
         lastUpdatedAt.clear()
         eventLog.clear()
         pinnedKeys.clear()
+        ignoredKeys.clear()
     }
 
     data class EventEntry(
@@ -46,6 +59,8 @@ object EngineReverseStateHolder {
     )
 
     fun onEventReceived(key: String, value: String, source: String) {
+        // Chaves ignoradas não recebem mais atualizações na grid
+        if (ignoredKeys.contains(key)) return
         discoveredKeys[key] = value
         lastUpdatedAt[key] = System.currentTimeMillis()
         val entry = EventEntry(

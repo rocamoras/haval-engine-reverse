@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -727,8 +728,10 @@ private fun KeysTab(
 
     val recentCutoff = now - 2 * 60 * 1000L
 
+    val ignoredList = state.ignoredKeys
+
     val sortedRegular = state.discoveredKeys.entries
-        .filter { it.key !in pinnedList }
+        .filter { it.key !in pinnedList && it.key !in ignoredList }
         .let { list ->
             if (filterRecent) list.filter { (state.lastUpdatedAt[it.key] ?: 0L) >= recentCutoff }
             else list
@@ -1009,7 +1012,7 @@ private fun KeysTab(
                             fontFamily = FontFamily.Monospace)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "${pinnedList.size} chave${if (pinnedList.size > 1) "s" else ""} — duplo clique para desafixar",
+                            "${pinnedList.size} chave${if (pinnedList.size > 1) "s" else ""} — 2× desafixa · 3× ignora",
                             color = Color(0xFF546E7A), fontSize = 10.sp
                         )
                     }
@@ -1017,11 +1020,21 @@ private fun KeysTab(
                 items(pinnedList, key = { "pin_$it" }) { key ->
                     val value   = state.discoveredKeys[key] ?: "--"
                     val lastLog = state.eventLog.firstOrNull { it.key == key }
+                    var clicks by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(clicks) {
+                        if (clicks == 0) return@LaunchedEffect
+                        delay(350)
+                        when (clicks) {
+                            2    -> onUnpinKey(key)
+                            in 3..Int.MAX_VALUE -> state.ignoreKey(key)
+                        }
+                        clicks = 0
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color(0xFF111A11))
-                            .combinedClickable(onClick = {}, onDoubleClick = { onUnpinKey(key) })
+                            .clickable { clicks++ }
                             .padding(horizontal = 12.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1046,10 +1059,20 @@ private fun KeysTab(
             // ── Chaves regulares ─────────────────────────────────────────
             items(sortedRegular, key = { it.key }) { (key, value) ->
                 val lastLog = state.eventLog.firstOrNull { it.key == key }
+                var clicks by remember { mutableIntStateOf(0) }
+                LaunchedEffect(clicks) {
+                    if (clicks == 0) return@LaunchedEffect
+                    delay(350)
+                    when (clicks) {
+                        2    -> state.pinKey(key)
+                        in 3..Int.MAX_VALUE -> state.ignoreKey(key)
+                    }
+                    clicks = 0
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .combinedClickable(onClick = {}, onDoubleClick = { state.pinKey(key) })
+                        .clickable { clicks++ }
                         .padding(horizontal = 12.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1065,6 +1088,57 @@ private fun KeysTab(
                         overflow = TextOverflow.Ellipsis)
                 }
                 HorizontalDivider(color = Color(0xFF1E1E1E), thickness = 0.5.dp)
+            }
+
+            // ── Seção de chaves ignoradas (no final) ─────────────────────
+            if (ignoredList.isNotEmpty()) {
+                item(key = "__ignored_header__") {
+                    HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 1.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1A1212))
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🚫 IGNORADAS", color = Color(0xFF546E7A), fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${ignoredList.size} chave${if (ignoredList.size > 1) "s" else ""} — duplo clique para restaurar",
+                            color = Color(0xFF3A3A4E), fontSize = 10.sp
+                        )
+                    }
+                }
+                items(ignoredList, key = { "ign_$it" }) { key ->
+                    val lastValue = state.discoveredKeys[key] ?: "--"
+                    var clicks by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(clicks) {
+                        if (clicks == 0) return@LaunchedEffect
+                        delay(350)
+                        if (clicks >= 2) state.unignoreKey(key)
+                        clicks = 0
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1A1212))
+                            .clickable { clicks++ }
+                            .padding(horizontal = 12.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🚫 $key", color = Color(0xFF3A3A4E), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.6f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(lastValue, color = Color(0xFF3A3A4E), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.25f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("ignorada", color = Color(0xFF2A2A3E), fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(0.15f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    HorizontalDivider(color = Color(0xFF1A1212), thickness = 0.5.dp)
+                }
             }
         }
     }
