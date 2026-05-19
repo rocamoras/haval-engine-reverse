@@ -1049,7 +1049,7 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 String reqAction = intent.getStringExtra(EXTRA_REQ_ACTION);
                 String reqKey    = intent.getStringExtra(EXTRA_REQ_KEY);
                 String reqValue  = intent.getStringExtra(EXTRA_REQ_VALUE);
-                if (reqAction == null) reqAction = "set";
+                if (reqAction == null) reqAction = "cmd.common.request.set";
                 if (reqKey != null && !reqKey.isEmpty()) {
                     final String fa = reqAction;
                     final String fk = reqKey;

@@ -358,7 +358,7 @@ private fun TestsTab(state: EngineReverseStateHolder) {
     // Registra o último envio por chave: key → "HH:mm:ss  action=X  value=Y"
     val sentLog = remember { androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>() }
 
-    fun sendRequest(key: String, value: String, reqAction: String = "set") {
+    fun sendRequest(key: String, value: String, reqAction: String = "cmd.common.request.set") {
         context.startService(
             Intent(context, UniversalMonitorService::class.java).apply {
                 action = UniversalMonitorService.ACTION_SEND_REQUEST
