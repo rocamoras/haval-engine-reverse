@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "231132596901",
+    "project_id": "havalenginereverse",
+    "storage_bucket": "havalenginereverse.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:231132596901:android:b0e046ba7b4186b0709b4c",
+        "android_client_info": {
+          "package_name": "br.com.redesurftank.havalenginereverse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZB2Uwb3ZRVteDX-LN0lKrdk2LR8qVRws"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:231132596901:android:b48f671dcf17d22c709b4c",
+        "android_client_info": {
+          "package_name": "haval.engine.reverse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZB2Uwb3ZRVteDX-LN0lKrdk2LR8qVRws"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

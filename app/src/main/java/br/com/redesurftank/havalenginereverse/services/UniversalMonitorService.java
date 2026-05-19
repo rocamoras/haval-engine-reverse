@@ -1271,16 +1271,6 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 Log.w(TAG, "[S3b] Falhou com wildcard: " + e.getMessage());
             }
 
-            // Carrega valores iniciais das chaves conhecidas (seed)
-            String[] values = controlService.fetchDatas(KNOWN_PROPS);
-            if (values != null) {
-                for (int i = 0; i < KNOWN_PROPS.length && i < values.length; i++) {
-                    if (values[i] != null) {
-                        EngineReverseStateHolder.INSTANCE.onEventReceived(KNOWN_PROPS[i], values[i], "initial-fetch");
-                    }
-                }
-            }
-
             Shizuku.addBinderDeadListener(this);
             EngineReverseStateHolder.INSTANCE.setConnected(true,
                     "Conectado — " + EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().size()

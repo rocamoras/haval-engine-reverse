@@ -325,12 +325,24 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
+                text = {
+                    Text(
+                        "Logs",
+                        color = if (selectedTab == 2) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
         when (selectedTab) {
             0 -> KeysTab(state = state, onUnpinKey = { state.unpinKey(it) })
             1 -> TestsTab(state = state)
+            2 -> LogsTab(state = state)
         }
     }
 }
@@ -1202,13 +1214,193 @@ private fun StrategyButton(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Aba de Logs
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun LogsTab(state: EngineReverseStateHolder) {
+    val logs = state.eventLog
+    var uploadStatus by remember { mutableStateOf("") }
+    var uploading by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
+
+        // ── Barra de controles ────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1A1A2E))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Botão ativar/desativar
+            val logEnabled = state.logEnabled
+            OutlinedButton(
+                onClick = { state.logEnabled = !logEnabled },
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (logEnabled) Color(0xFF1B5E20) else Color(0xFF1A1A2E),
+                    contentColor   = if (logEnabled) Color(0xFF81C784) else Color(0xFF546E7A)
+                ),
+                border = BorderStroke(1.dp, if (logEnabled) Color(0xFF81C784) else Color(0xFF546E7A)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    if (logEnabled) "Pausar" else "Ativar",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            // Botão limpar
+            OutlinedButton(
+                onClick = { state.clearLog() },
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color(0xFF1A1A2E),
+                    contentColor   = Color(0xFFEF9A9A)
+                ),
+                border = BorderStroke(1.dp, Color(0xFFEF9A9A)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text("Limpar", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+
+            // Botão enviar
+            OutlinedButton(
+                onClick = {
+                    if (!uploading && logs.isNotEmpty()) {
+                        uploading = true
+                        uploadStatus = ""
+                        FirebaseLogUploader.upload(
+                            entries = logs.toList(),
+                            onProgress = { uploadStatus = it },
+                            onSuccess = { uploadStatus = "✓ Enviado: $it"; uploading = false },
+                            onError   = { uploadStatus = "✗ $it"; uploading = false }
+                        )
+                    }
+                },
+                enabled = !uploading && logs.isNotEmpty(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color(0xFF1A1A2E),
+                    contentColor   = Color(0xFF4FC3F7)
+                ),
+                border = BorderStroke(1.dp, Color(0xFF4FC3F7)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                if (uploading) {
+                    CircularProgressIndicator(Modifier.size(12.dp), color = Color(0xFF4FC3F7), strokeWidth = 1.5.dp)
+                } else {
+                    Text("Enviar", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                "${logs.size} / 2000",
+                color = Color(0xFF546E7A),
+                fontSize = 11.sp
+            )
+        }
+
+        // ── Status do upload ──────────────────────────────────────────────
+        if (uploadStatus.isNotEmpty()) {
+            Text(
+                text = uploadStatus,
+                color = if (uploadStatus.startsWith("✓")) Color(0xFF81C784)
+                        else if (uploadStatus.startsWith("✗")) Color(0xFFEF9A9A)
+                        else Color(0xFF546E7A),
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0D0D1A))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // ── Lista de entradas ─────────────────────────────────────────────
+        if (logs.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (state.logEnabled) "Aguardando eventos..." else "Log pausado",
+                    color = Color(0xFF546E7A),
+                    fontSize = 13.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(logs, key = { it.id }) { entry ->
+                    LogEntryRow(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogEntryRow(entry: EngineReverseStateHolder.EventEntry) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Timestamp
+        Text(
+            text = entry.time,
+            color = Color(0xFF546E7A),
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.width(80.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        // Bolinha colorida com source
+        Box(
+            modifier = Modifier
+                .padding(top = 3.dp)
+                .size(6.dp)
+                .background(sourceColor(entry.source), shape = RoundedCornerShape(3.dp))
+        )
+        Spacer(Modifier.width(6.dp))
+        // Chave
+        Text(
+            text = entry.key,
+            color = Color(0xFFB0BEC5),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.width(6.dp))
+        // Valor
+        Text(
+            text = entry.value,
+            color = Color(0xFF4FC3F7),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 100.dp)
+        )
+    }
+}
+
 private fun sourceColor(source: String): Color = when {
     source.startsWith("listener")      -> Color(0xFF81C784)
     source.startsWith("raw-transact")  -> Color(0xFFFFB74D)
     source.startsWith("wildcard")      -> Color(0xFFCE93D8)
     source.startsWith("empty-key")     -> Color(0xFF4FC3F7)
-    source.startsWith("initial-fetch") -> Color(0xFF546E7A)
-    source.startsWith("reply")         -> Color(0xFFFF8A65)
+source.startsWith("reply")         -> Color(0xFFFF8A65)
     source.startsWith("probe")         -> Color(0xFFF48FB1)
     source.startsWith("apk-scan")      -> Color(0xFFFFD54F)
     source.startsWith("dumpsys")       -> Color(0xFF4FC3F7)

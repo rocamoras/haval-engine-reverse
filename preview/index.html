@@ -122,7 +122,7 @@
 </div>
 
 <script>
-const SC = { listener:'#81C784', 'raw-transact':'#FFB74D', wildcard:'#CE93D8', 'empty-key':'#4FC3F7', 'initial-fetch':'#546E7A', 'reply-code-4':'#FF8A65', probe:'#F48FB1', 'apk-scan':'#FFD54F' };
+const SC = { listener:'#81C784', 'raw-transact':'#FFB74D', wildcard:'#CE93D8', 'empty-key':'#4FC3F7', 'reply-code-4':'#FF8A65', probe:'#F48FB1', 'apk-scan':'#FFD54F' };
 function sc(s) { return SC[s] || '#B0BEC5'; }
 
 const dk = {}, el = [];
@@ -284,10 +284,10 @@ const KN = [
   ['car.hvac.driver_temperature','24.0','listener'],['car.hvac.power_mode','1','listener'],
   ['car.hvac.ac_enable','1','listener'],['car.hvac.front_defrost_enable','0','listener'],
   ['car.hvac.heating_enable','0','listener'],['car.hvac.Intelligent_switch_enable','1','listener'],
-  ['car.hvac.setting.limit_enable','0','listener'],['car.hvac.front_temperature_range','16,32','initial-fetch'],
+  ['car.hvac.setting.limit_enable','0','listener'],['car.hvac.front_temperature_range','16,32','listener'],
   ['car.hvac.pm2.5_value','12','listener'],['car.hvac.setting.comfort_curve','1','listener'],
-  ['car.comfort_setting.chair_memory.auto_enable','0','initial-fetch'],
-  ['car.configure.ass_memory_setting','2','initial-fetch'],
+  ['car.comfort_setting.chair_memory.auto_enable','0','listener'],
+  ['car.configure.ass_memory_setting','2','listener'],
   ['car.comfort_setting.driver_seat_ventilation_level','2','listener'],
   ['car.comfort_setting.passenger_seat_ventilation_level','1','listener'],
   ['car.body.door_fl_open','0','wildcard'],['car.body.door_fr_open','0','wildcard'],

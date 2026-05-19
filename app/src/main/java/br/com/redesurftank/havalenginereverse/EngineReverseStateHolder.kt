@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import java.util.concurrent.atomic.AtomicLong
 
 object EngineReverseStateHolder {
 
@@ -19,6 +20,7 @@ object EngineReverseStateHolder {
 
     // log cronológico dos eventos
     val eventLog = mutableStateListOf<EventEntry>()
+    var logEnabled by mutableStateOf(true)
 
     // chaves fixadas pelo usuário (aparecem no topo da aba Chaves)
     val pinnedKeys = mutableStateListOf<String>()
@@ -51,7 +53,14 @@ object EngineReverseStateHolder {
         ignoredKeys.clear()
     }
 
+    fun clearLog() {
+        eventLog.clear()
+    }
+
+    private val idCounter = AtomicLong(0)
+
     data class EventEntry(
+        val id: Long,
         val time: String,
         val key: String,
         val value: String,
@@ -63,7 +72,9 @@ object EngineReverseStateHolder {
         if (ignoredKeys.contains(key)) return
         discoveredKeys[key] = value
         lastUpdatedAt[key] = System.currentTimeMillis()
+        if (!logEnabled) return
         val entry = EventEntry(
+            id = idCounter.getAndIncrement(),
             time = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
                 .format(java.util.Date()),
             key = key,
@@ -71,7 +82,7 @@ object EngineReverseStateHolder {
             source = source
         )
         eventLog.add(0, entry)
-        if (eventLog.size > 200) eventLog.removeAt(eventLog.lastIndex)
+        if (eventLog.size > 2000) eventLog.removeAt(eventLog.lastIndex)
     }
 
     var probeRunning      by mutableStateOf(false)
