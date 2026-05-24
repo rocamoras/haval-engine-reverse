@@ -81,6 +81,12 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     public static final String EXTRA_REQ_KEY       = "req_key";
     public static final String EXTRA_REQ_VALUE     = "req_value";
 
+    /** Ações: verificar e alternar estado do pacote Speech. */
+    public static final String ACTION_CHECK_SPEECH_PACKAGE  = "br.com.redesurftank.havalenginereverse.CHECK_SPEECH_PACKAGE";
+    public static final String ACTION_TOGGLE_SPEECH_PACKAGE = "br.com.redesurftank.havalenginereverse.TOGGLE_SPEECH_PACKAGE";
+
+    private static final String SPEECH_PACKAGE = "com.iflytek.cutefly.speechclient.hmi";
+
     /**
      * Estratégia 5 — Active Probe.
      * Candidatos a testar via fetchDatas(). Qualquer um que retorne valor não-nulo
@@ -1077,6 +1083,14 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 }
                 return START_STICKY;
             }
+            if (ACTION_CHECK_SPEECH_PACKAGE.equals(action)) {
+                backgroundHandler.post(this::checkSpeechPackage);
+                return START_STICKY;
+            }
+            if (ACTION_TOGGLE_SPEECH_PACKAGE.equals(action)) {
+                backgroundHandler.post(this::toggleSpeechPackage);
+                return START_STICKY;
+            }
         }
 
         if (isServiceRunning) {
@@ -1326,5 +1340,44 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         super.onDestroy();
         isServiceRunning = false;
         if (handlerThread != null) handlerThread.quitSafely();
+    }
+
+    // ── Ações: pacote Speech ──────────────────────────────────────────────
+
+    private void checkSpeechPackage() {
+        EngineReverseStateHolder.INSTANCE.setSpeechPackageLoading(true);
+        try {
+            // pm list packages -d lista apenas pacotes desabilitados
+            String out = runShell("pm list packages -d 2>/dev/null | grep " + SPEECH_PACKAGE, 8000);
+            boolean disabled = out.contains(SPEECH_PACKAGE);
+            EngineReverseStateHolder.INSTANCE.setSpeechPackageState(!disabled);
+            Log.w(TAG, "[speech] status: " + (!disabled ? "ativo" : "desativado"));
+        } catch (Exception e) {
+            Log.e(TAG, "[speech] checkSpeechPackage falhou: " + e.getMessage(), e);
+            EngineReverseStateHolder.INSTANCE.setSpeechPackageState(null);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setSpeechPackageLoading(false);
+        }
+    }
+
+    private void toggleSpeechPackage() {
+        EngineReverseStateHolder.INSTANCE.setSpeechPackageLoading(true);
+        try {
+            Boolean current = EngineReverseStateHolder.INSTANCE.getSpeechPackageEnabled();
+            if (current == null) {
+                checkSpeechPackage();
+                return;
+            }
+            String cmd = current
+                    ? "pm disable-user --user 0 " + SPEECH_PACKAGE
+                    : "pm enable --user 0 " + SPEECH_PACKAGE;
+            runShell(cmd, 8000);
+            Log.w(TAG, "[speech] toggle → " + cmd);
+            // Re-verifica o estado real após o comando
+            checkSpeechPackage();
+        } catch (Exception e) {
+            Log.e(TAG, "[speech] toggleSpeechPackage falhou: " + e.getMessage(), e);
+            EngineReverseStateHolder.INSTANCE.setSpeechPackageLoading(false);
+        }
     }
 }

@@ -336,6 +336,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 3,
+                onClick = { selectedTab = 3 },
+                text = {
+                    Text(
+                        "Ações",
+                        color = if (selectedTab == 3) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -343,6 +354,7 @@ fun DiscoveryScreen() {
             0 -> KeysTab(state = state, onUnpinKey = { state.unpinKey(it) })
             1 -> TestsTab(state = state)
             2 -> LogsTab(state = state)
+            3 -> ActionsTab(state = state)
         }
     }
 }
@@ -643,6 +655,96 @@ private fun TestsTab(state: EngineReverseStateHolder) {
                         fontSize = 13.sp,
                         fontWeight = if (wadeModeIsOn) FontWeight.Bold else FontWeight.Normal
                     )
+                }
+            }
+        }
+
+        // ── Card 6: car.oms.frs.seat_staff_info — campo livre ───────────
+        val seatStaffKey     = "car.oms.frs.seat_staff_info"
+        val seatStaffCurrent = state.discoveredKeys[seatStaffKey]
+        var seatStaffInput   by remember { mutableStateOf(seatStaffCurrent ?: "") }
+
+        LaunchedEffect(seatStaffCurrent) {
+            if (seatStaffInput.isEmpty() && seatStaffCurrent != null) seatStaffInput = seatStaffCurrent
+        }
+
+        TestCard(title = seatStaffKey, currentValue = seatStaffCurrent, sentInfo = sentLog[seatStaffKey]) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = seatStaffInput,
+                    onValueChange = { seatStaffInput = it },
+                    label = { Text("Novo valor", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF2A2A3E),
+                        focusedLabelColor    = Color(0xFF4FC3F7),
+                        unfocusedLabelColor  = Color(0xFF546E7A),
+                        focusedTextColor     = Color(0xFFE0E0E0),
+                        unfocusedTextColor   = Color(0xFFE0E0E0),
+                        cursorColor          = Color(0xFF4FC3F7)
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendRequest(seatStaffKey, seatStaffInput) })
+                )
+                Button(
+                    onClick = { sendRequest(seatStaffKey, seatStaffInput) },
+                    enabled = state.vehicleConnected && seatStaffInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
+                    border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text("Enviar", color = Color(0xFF4FC3F7), fontSize = 12.sp)
+                }
+            }
+        }
+
+        // ── Card 7: car.basic.seated_state — campo livre ─────────────────
+        val seatedStateKey     = "car.basic.seated_state"
+        val seatedStateCurrent = state.discoveredKeys[seatedStateKey]
+        var seatedStateInput   by remember { mutableStateOf(seatedStateCurrent ?: "") }
+
+        LaunchedEffect(seatedStateCurrent) {
+            if (seatedStateInput.isEmpty() && seatedStateCurrent != null) seatedStateInput = seatedStateCurrent
+        }
+
+        TestCard(title = seatedStateKey, currentValue = seatedStateCurrent, sentInfo = sentLog[seatedStateKey]) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = seatedStateInput,
+                    onValueChange = { seatedStateInput = it },
+                    label = { Text("Novo valor", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = Color(0xFF4FC3F7),
+                        unfocusedBorderColor = Color(0xFF2A2A3E),
+                        focusedLabelColor    = Color(0xFF4FC3F7),
+                        unfocusedLabelColor  = Color(0xFF546E7A),
+                        focusedTextColor     = Color(0xFFE0E0E0),
+                        unfocusedTextColor   = Color(0xFFE0E0E0),
+                        cursorColor          = Color(0xFF4FC3F7)
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendRequest(seatedStateKey, seatedStateInput) })
+                )
+                Button(
+                    onClick = { sendRequest(seatedStateKey, seatedStateInput) },
+                    enabled = state.vehicleConnected && seatedStateInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
+                    border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text("Enviar", color = Color(0xFF4FC3F7), fontSize = 12.sp)
                 }
             }
         }
@@ -1394,6 +1496,156 @@ private fun LogEntryRow(entry: EngineReverseStateHolder.EventEntry) {
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aba Ações
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ActionsTab(state: EngineReverseStateHolder) {
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        context.startService(
+            Intent(context, UniversalMonitorService::class.java).apply {
+                action = UniversalMonitorService.ACTION_CHECK_SPEECH_PACKAGE
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "Monitoramento e Ações",
+            color = Color(0xFF546E7A),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+
+        ActionPackageCard(
+            name        = "Speech",
+            packageName = "com.iflytek.cutefly.speechclient.hmi",
+            isEnabled   = state.speechPackageEnabled,
+            isLoading   = state.speechPackageLoading,
+            onClick = {
+                context.startService(
+                    Intent(context, UniversalMonitorService::class.java).apply {
+                        action = UniversalMonitorService.ACTION_TOGGLE_SPEECH_PACKAGE
+                    }
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun ActionPackageCard(
+    name: String,
+    packageName: String,
+    isEnabled: Boolean?,
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    val statusColor = when {
+        isLoading        -> Color(0xFF546E7A)
+        isEnabled == null -> Color(0xFF546E7A)
+        isEnabled        -> Color(0xFF81C784)
+        else             -> Color(0xFFEF5350)
+    }
+
+    val statusText = when {
+        isLoading        -> "Verificando..."
+        isEnabled == null -> "Desconhecido"
+        isEnabled        -> "Ativo"
+        else             -> "Desativado"
+    }
+
+    val actionHint = when {
+        isLoading || isEnabled == null -> "Aguarde..."
+        isEnabled                      -> "Toque para desativar"
+        else                           -> "Toque para ativar"
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isLoading) { onClick() },
+        shape  = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Indicador colorido
+            Box(
+                Modifier
+                    .size(12.dp)
+                    .background(statusColor, shape = RoundedCornerShape(6.dp))
+            )
+            Spacer(Modifier.width(12.dp))
+
+            // Textos
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    name,
+                    color      = Color(0xFFE0E0E0),
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 15.sp
+                )
+                Text(
+                    packageName,
+                    color      = Color(0xFF546E7A),
+                    fontSize   = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    actionHint,
+                    color    = statusColor.copy(alpha = 0.75f),
+                    fontSize = 10.sp
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Badge de status ou spinner
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(24.dp),
+                    color       = Color(0xFF4FC3F7),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Surface(
+                    shape  = RoundedCornerShape(6.dp),
+                    color  = statusColor.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        statusText,
+                        color      = statusColor,
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier   = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 private fun sourceColor(source: String): Color = when {
     source.startsWith("listener")      -> Color(0xFF81C784)

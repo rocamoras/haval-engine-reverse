@@ -93,6 +93,14 @@ object EngineReverseStateHolder {
     var bruteRunning      by mutableStateOf(false)
     var dataFilesRunning  by mutableStateOf(false)
 
+    // ── Ações: pacote Speech ──────────────────────────────────────────────
+    var speechPackageEnabled by mutableStateOf<Boolean?>(null)
+    var speechPackageLoading by mutableStateOf(false)
+
+    fun setSpeechPackageState(enabled: Boolean?) {
+        speechPackageEnabled = enabled
+    }
+
     fun setConnected(connected: Boolean, status: String) {
         vehicleConnected = connected
         strategyStatus = status
