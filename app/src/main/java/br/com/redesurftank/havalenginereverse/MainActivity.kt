@@ -1541,6 +1541,25 @@ private fun ActionsTab(state: EngineReverseStateHolder) {
                 )
             }
         )
+
+        // ── Card: seat belt warning — ciclo 0..4 ─────────────────────────
+        val seatBeltWarnKey = "car.configure.seat_belt_warning"
+        ActionValueCycleCard(
+            title   = "Seat Belt Warning",
+            key     = seatBeltWarnKey,
+            values  = listOf("0", "1", "2", "3", "4"),
+            current = state.discoveredKeys[seatBeltWarnKey],
+            onSend  = { value ->
+                context.startService(
+                    Intent(context, UniversalMonitorService::class.java).apply {
+                        action = UniversalMonitorService.ACTION_SEND_REQUEST
+                        putExtra(UniversalMonitorService.EXTRA_REQ_ACTION, "cmd.common.request.set")
+                        putExtra(UniversalMonitorService.EXTRA_REQ_KEY, seatBeltWarnKey)
+                        putExtra(UniversalMonitorService.EXTRA_REQ_VALUE, value)
+                    }
+                )
+            }
+        )
     }
 }
 
@@ -1639,6 +1658,103 @@ private fun ActionPackageCard(
                         fontWeight = FontWeight.Medium,
                         modifier   = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionValueCycleCard(
+    title: String,
+    key: String,
+    values: List<String>,
+    current: String?,
+    onSend: (String) -> Unit
+) {
+    Card(
+        shape  = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+        border = BorderStroke(1.dp, Color(0xFF4FC3F7).copy(alpha = 0.25f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+            // ── Cabeçalho ────────────────────────────────────────────────
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .background(
+                            if (current != null) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                            shape = RoundedCornerShape(5.dp)
+                        )
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        color      = Color(0xFFE0E0E0),
+                        fontWeight = FontWeight.Bold,
+                        fontSize   = 15.sp
+                    )
+                    Text(
+                        key,
+                        color      = Color(0xFF546E7A),
+                        fontSize   = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis
+                    )
+                }
+                // Valor atual em destaque
+                if (current != null) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF4FC3F7).copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "atual: $current",
+                            color      = Color(0xFF4FC3F7),
+                            fontSize   = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier   = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // ── Botões de valor ───────────────────────────────────────────
+            Row(
+                modifier            = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                values.forEach { v ->
+                    val isActive = v == current
+                    Button(
+                        onClick = { onSend(v) },
+                        enabled = !isActive,
+                        shape  = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor         = if (isActive) Color(0xFF1A3A4A) else Color(0xFF1E1E2E),
+                            disabledContainerColor = Color(0xFF1A3A4A)
+                        ),
+                        border = BorderStroke(
+                            1.5.dp,
+                            if (isActive) Color(0xFF4FC3F7) else Color(0xFF2A2A3E)
+                        ),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                    ) {
+                        Text(
+                            v,
+                            color      = if (isActive) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                            fontSize   = 14.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
                 }
             }
         }
