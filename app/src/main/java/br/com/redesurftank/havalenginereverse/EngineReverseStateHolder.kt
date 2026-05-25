@@ -1,5 +1,6 @@
 package br.com.redesurftank.havalenginereverse
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -7,7 +8,38 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import java.util.concurrent.atomic.AtomicLong
 
+private const val PREFS_NAME = "engine_reverse_prefs"
+private const val KEY_PINNED  = "pinned_keys"
+private const val KEY_IGNORED = "ignored_keys"
+private const val SEPARATOR   = "" // ASCII Unit Separator — nunca aparece em nomes de chaves
+
 object EngineReverseStateHolder {
+
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        if (appContext != null) return
+        appContext = context.applicationContext
+        loadPersistedKeys()
+    }
+
+    private fun prefs() = appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun loadPersistedKeys() {
+        val p = prefs() ?: return
+        val pinned  = p.getString(KEY_PINNED,  null)
+        val ignored = p.getString(KEY_IGNORED, null)
+        if (!pinned.isNullOrEmpty())  pinnedKeys.addAll(pinned.split(SEPARATOR))
+        if (!ignored.isNullOrEmpty()) ignoredKeys.addAll(ignored.split(SEPARATOR))
+    }
+
+    private fun savePinned() {
+        prefs()?.edit()?.putString(KEY_PINNED, pinnedKeys.joinToString(SEPARATOR))?.apply()
+    }
+
+    private fun saveIgnored() {
+        prefs()?.edit()?.putString(KEY_IGNORED, ignoredKeys.joinToString(SEPARATOR))?.apply()
+    }
 
     var vehicleConnected by mutableStateOf(false)
     var strategyStatus   by mutableStateOf("Aguardando conexão...")
@@ -29,20 +61,20 @@ object EngineReverseStateHolder {
     val ignoredKeys = mutableStateListOf<String>()
 
     fun pinKey(key: String) {
-        if (!pinnedKeys.contains(key)) pinnedKeys.add(0, key)
+        if (!pinnedKeys.contains(key)) { pinnedKeys.add(0, key); savePinned() }
     }
 
     fun unpinKey(key: String) {
-        pinnedKeys.remove(key)
+        if (pinnedKeys.remove(key)) savePinned()
     }
 
     fun ignoreKey(key: String) {
         unpinKey(key)
-        if (!ignoredKeys.contains(key)) ignoredKeys.add(key)
+        if (!ignoredKeys.contains(key)) { ignoredKeys.add(key); saveIgnored() }
     }
 
     fun unignoreKey(key: String) {
-        ignoredKeys.remove(key)
+        if (ignoredKeys.remove(key)) saveIgnored()
     }
 
     fun clearAll() {
@@ -51,6 +83,7 @@ object EngineReverseStateHolder {
         eventLog.clear()
         pinnedKeys.clear()
         ignoredKeys.clear()
+        prefs()?.edit()?.remove(KEY_PINNED)?.remove(KEY_IGNORED)?.apply()
     }
 
     fun clearLog() {

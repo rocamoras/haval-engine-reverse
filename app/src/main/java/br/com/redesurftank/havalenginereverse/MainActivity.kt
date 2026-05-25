@@ -63,6 +63,7 @@ private const val GITHUB_RELEASES_API =
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        EngineReverseStateHolder.init(applicationContext)
         setContent {
             HavalEngineReverseTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
