@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.ui.text.input.ImeAction
 import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
+import br.com.redesurftank.havalenginereverse.utils.TelnetClientWrapper
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -348,6 +349,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 4,
+                onClick = { selectedTab = 4 },
+                text = {
+                    Text(
+                        "Rede",
+                        color = if (selectedTab == 4) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -356,6 +368,7 @@ fun DiscoveryScreen() {
             1 -> TestsTab(state = state)
             2 -> LogsTab(state = state)
             3 -> ActionsTab(state = state)
+            4 -> NetworkTab(state = state)
         }
     }
 }
@@ -1779,4 +1792,149 @@ source.startsWith("reply")         -> Color(0xFFFF8A65)
     source.startsWith("data-files")    -> Color(0xFF80DEEA)
     source.startsWith("request")       -> Color(0xFFFFCC80)
     else                               -> Color(0xFFB0BEC5)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aba Rede — captura tcpdump
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun NetworkTab(state: EngineReverseStateHolder) {
+    val scope = rememberCoroutineScope()
+
+    fun runShell(cmd: String) {
+        scope.launch(Dispatchers.IO) {
+            var telnet: TelnetClientWrapper? = null
+            try {
+                telnet = TelnetClientWrapper()
+                telnet.connect("127.0.0.1", 23)
+                telnet.executeCommand(cmd, 8000)
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) { state.tcpdumpStatus = "Erro: ${e.message}" }
+            } finally {
+                try { telnet?.disconnect() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0D0D1A))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // ── Card de status ────────────────────────────────────────────────
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E)),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF2A2A3E)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Captura de Rede (tcpdump)",
+                    color = Color(0xFF4FC3F7),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Arquivo: ${state.tcpdumpFilePath}",
+                    color = Color(0xFF546E7A),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                if (state.tcpdumpStatus.isNotBlank()) {
+                    Text(
+                        state.tcpdumpStatus,
+                        color = when {
+                            state.tcpdumpStatus.startsWith("Erro") -> Color(0xFFEF9A9A)
+                            state.tcpdumpStatus.startsWith("✓") || state.tcpdumpStatus.startsWith("Enviado") -> Color(0xFF81C784)
+                            else -> Color(0xFFFFD54F)
+                        },
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                if (state.tcpdumpRunning) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(Modifier.size(12.dp), color = Color(0xFF4FC3F7), strokeWidth = 1.5.dp)
+                        Text("Capturando tráfego...", color = Color(0xFF4FC3F7), fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // ── Botões ────────────────────────────────────────────────────────
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            // Iniciar
+            Button(
+                onClick = {
+                    state.tcpdumpStatus = "Capturando..."
+                    state.tcpdumpRunning = true
+                    runShell("tcpdump -i any -s 0 -w ${state.tcpdumpFilePath} > /dev/null 2>&1 &")
+                },
+                enabled = !state.tcpdumpRunning,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
+                border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Iniciar", color = Color(0xFF4FC3F7), fontSize = 13.sp)
+            }
+
+            // Parar
+            Button(
+                onClick = {
+                    state.tcpdumpRunning = false
+                    state.tcpdumpStatus = "Parado. Arquivo: ${state.tcpdumpFilePath}"
+                    runShell("pkill tcpdump")
+                },
+                enabled = state.tcpdumpRunning,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A1A1A)),
+                border = BorderStroke(1.dp, Color(0x55FFD54F)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Parar", color = Color(0xFFFFD54F), fontSize = 13.sp)
+            }
+        }
+
+        // Enviar
+        var uploading by remember { mutableStateOf(false) }
+        val pcapFile = File(state.tcpdumpFilePath)
+
+        Button(
+            onClick = {
+                uploading = true
+                scope.launch(Dispatchers.IO) {
+                    FirebaseLogUploader.uploadPcap(
+                        file = pcapFile,
+                        onProgress = { msg -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = msg } },
+                        onSuccess  = { url -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = "✓ Enviado: $url"; uploading = false } },
+                        onError    = { err -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = "Erro: $err"; uploading = false } }
+                    )
+                }
+            },
+            enabled = !uploading && !state.tcpdumpRunning && pcapFile.exists(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2A1A)),
+            border = BorderStroke(1.dp, Color(0x5581C784)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (uploading) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF81C784), strokeWidth = 1.5.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("Enviar para nuvem", color = Color(0xFF81C784), fontSize = 13.sp)
+        }
+
+        // Dica
+        Text(
+            "Dica: inicie a captura, navegue pelo app de clima na central por ~1 min, depois pare e envie o .pcap para analisar no Wireshark.",
+            color = Color(0xFF37474F),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
 }

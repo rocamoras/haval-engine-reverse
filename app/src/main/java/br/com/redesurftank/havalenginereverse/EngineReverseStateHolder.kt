@@ -118,6 +118,11 @@ object EngineReverseStateHolder {
         if (eventLog.size > 2000) eventLog.removeAt(eventLog.lastIndex)
     }
 
+    // ── Rede: tcpdump ────────────────────────────────────────────────────
+    var tcpdumpRunning  by mutableStateOf(false)
+    var tcpdumpFilePath by mutableStateOf("/sdcard/haval_capture.pcap")
+    var tcpdumpStatus   by mutableStateOf("")
+
     var probeRunning      by mutableStateOf(false)
     var apkScanRunning    by mutableStateOf(false)
     var dumpsysRunning    by mutableStateOf(false)
