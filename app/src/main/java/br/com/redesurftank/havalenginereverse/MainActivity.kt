@@ -1801,6 +1801,29 @@ source.startsWith("reply")         -> Color(0xFFFF8A65)
 @Composable
 private fun NetworkTab(state: EngineReverseStateHolder) {
     val scope = rememberCoroutineScope()
+    val logFile = "/sdcard/haval_capture.log"
+
+    // linhas ao vivo exibidas enquanto captura
+    var liveLines by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // polling a cada 2s enquanto tcpdump está rodando
+    LaunchedEffect(state.tcpdumpRunning) {
+        if (!state.tcpdumpRunning) return@LaunchedEffect
+        while (state.tcpdumpRunning) {
+            delay(2000)
+            val lines = withContext(Dispatchers.IO) {
+                var telnet: TelnetClientWrapper? = null
+                try {
+                    telnet = TelnetClientWrapper()
+                    telnet.connect("127.0.0.1", 23)
+                    telnet.executeCommand("tail -40 $logFile 2>/dev/null", 4000)
+                } catch (_: Exception) { "" } finally {
+                    try { telnet?.disconnect() } catch (_: Exception) {}
+                }
+            }
+            liveLines = lines.lines().filter { it.isNotBlank() }.takeLast(40)
+        }
+    }
 
     fun runShell(cmd: String) {
         scope.launch(Dispatchers.IO) {
@@ -1822,7 +1845,7 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
             .fillMaxSize()
             .background(Color(0xFF0D0D1A))
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // ── Card de status ────────────────────────────────────────────────
         Card(
@@ -1831,17 +1854,22 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
             border = BorderStroke(1.dp, Color(0xFF2A2A3E)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (state.tcpdumpRunning) {
+                        CircularProgressIndicator(Modifier.size(12.dp), color = Color(0xFF4FC3F7), strokeWidth = 1.5.dp)
+                    }
+                    Text(
+                        if (state.tcpdumpRunning) "Capturando tráfego..." else "Captura de Rede (tcpdump)",
+                        color = Color(0xFF4FC3F7),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 Text(
-                    "Captura de Rede (tcpdump)",
-                    color = Color(0xFF4FC3F7),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "Arquivo: ${state.tcpdumpFilePath}",
-                    color = Color(0xFF546E7A),
-                    fontSize = 11.sp,
+                    "pcap: ${state.tcpdumpFilePath}",
+                    color = Color(0xFF37474F),
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
                 if (state.tcpdumpStatus.isNotBlank()) {
@@ -1849,45 +1877,41 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
                         state.tcpdumpStatus,
                         color = when {
                             state.tcpdumpStatus.startsWith("Erro") -> Color(0xFFEF9A9A)
-                            state.tcpdumpStatus.startsWith("✓") || state.tcpdumpStatus.startsWith("Enviado") -> Color(0xFF81C784)
+                            state.tcpdumpStatus.startsWith("✓")    -> Color(0xFF81C784)
                             else -> Color(0xFFFFD54F)
                         },
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
-                }
-                if (state.tcpdumpRunning) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CircularProgressIndicator(Modifier.size(12.dp), color = Color(0xFF4FC3F7), strokeWidth = 1.5.dp)
-                        Text("Capturando tráfego...", color = Color(0xFF4FC3F7), fontSize = 11.sp)
-                    }
                 }
             }
         }
 
-        // ── Botões ────────────────────────────────────────────────────────
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            // Iniciar
+        // ── Botões Iniciar / Parar / Enviar ───────────────────────────────
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
                 onClick = {
+                    liveLines = emptyList()
                     state.tcpdumpStatus = "Capturando..."
                     state.tcpdumpRunning = true
-                    runShell("tcpdump -i any -s 0 -w ${state.tcpdumpFilePath} > /dev/null 2>&1 &")
+                    // pcap binário + log texto em paralelo
+                    runShell(
+                        "rm -f $logFile 2>/dev/null; " +
+                        "tcpdump -i any -s 0 -n -w ${state.tcpdumpFilePath} > /dev/null 2>&1 & " +
+                        "tcpdump -i any -n -l > $logFile 2>&1 &"
+                    )
                 },
                 enabled = !state.tcpdumpRunning,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
                 border = BorderStroke(1.dp, Color(0x554FC3F7)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.weight(1f)
-            ) {
-                Text("Iniciar", color = Color(0xFF4FC3F7), fontSize = 13.sp)
-            }
+            ) { Text("Iniciar", color = Color(0xFF4FC3F7), fontSize = 13.sp) }
 
-            // Parar
             Button(
                 onClick = {
                     state.tcpdumpRunning = false
-                    state.tcpdumpStatus = "Parado. Arquivo: ${state.tcpdumpFilePath}"
+                    state.tcpdumpStatus = "Parado. Pronto para enviar."
                     runShell("pkill tcpdump")
                 },
                 enabled = state.tcpdumpRunning,
@@ -1895,25 +1919,39 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
                 border = BorderStroke(1.dp, Color(0x55FFD54F)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.weight(1f)
-            ) {
-                Text("Parar", color = Color(0xFFFFD54F), fontSize = 13.sp)
-            }
+            ) { Text("Parar", color = Color(0xFFFFD54F), fontSize = 13.sp) }
         }
 
-        // Enviar
         var uploading by remember { mutableStateOf(false) }
         val pcapFile = File(state.tcpdumpFilePath)
 
         Button(
             onClick = {
                 uploading = true
+                state.tcpdumpStatus = "Lendo arquivo..."
+                // 1) lê bytes no IO  2) chama Firebase na Main
                 scope.launch(Dispatchers.IO) {
-                    FirebaseLogUploader.uploadPcap(
-                        file = pcapFile,
-                        onProgress = { msg -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = msg } },
-                        onSuccess  = { url -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = "✓ Enviado: $url"; uploading = false } },
-                        onError    = { err -> scope.launch(Dispatchers.Main) { state.tcpdumpStatus = "Erro: $err"; uploading = false } }
-                    )
+                    val bytes = try {
+                        pcapFile.readBytes()
+                    } catch (e: Exception) {
+                        scope.launch(Dispatchers.Main) {
+                            state.tcpdumpStatus = "Erro ao ler arquivo: ${e.message}"
+                            uploading = false
+                        }
+                        return@launch
+                    }
+                    val ts = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.getDefault())
+                        .format(java.util.Date())
+                    val fileName = "pcap_$ts.pcap"
+                    scope.launch(Dispatchers.Main) {
+                        FirebaseLogUploader.uploadPcapBytes(
+                            bytes    = bytes,
+                            fileName = fileName,
+                            onProgress = { state.tcpdumpStatus = it },
+                            onSuccess  = { state.tcpdumpStatus = "✓ Enviado: $it"; uploading = false },
+                            onError    = { state.tcpdumpStatus = "Erro: $it"; uploading = false }
+                        )
+                    }
                 }
             },
             enabled = !uploading && !state.tcpdumpRunning && pcapFile.exists(),
@@ -1929,12 +1967,55 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
             Text("Enviar para nuvem", color = Color(0xFF81C784), fontSize = 13.sp)
         }
 
-        // Dica
-        Text(
-            "Dica: inicie a captura, navegue pelo app de clima na central por ~1 min, depois pare e envie o .pcap para analisar no Wireshark.",
-            color = Color(0xFF37474F),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
+        // ── Log ao vivo ───────────────────────────────────────────────────
+        if (liveLines.isNotEmpty() || state.tcpdumpRunning) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0A14)),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, Color(0xFF1A2A1A)),
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        "Pacotes capturados",
+                        color = Color(0xFF37474F),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                    LaunchedEffect(liveLines.size) {
+                        if (liveLines.isNotEmpty()) listState.animateScrollToItem(liveLines.lastIndex)
+                    }
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        items(liveLines) { line ->
+                            Text(
+                                line,
+                                color = when {
+                                    line.contains("HTTP") || line.contains(".80 ") || line.contains("> 80") -> Color(0xFF80CBC4)
+                                    line.contains("443")  -> Color(0xFFCE93D8)
+                                    line.contains("DNS")  || line.contains(".53 ") -> Color(0xFFFFD54F)
+                                    else -> Color(0xFF546E7A)
+                                },
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            Text(
+                "Inicie a captura, navegue pelo app de clima na central por ~1 min, depois pare e envie o .pcap para analisar no Wireshark.",
+                color = Color(0xFF37474F),
+                fontSize = 11.sp
+            )
+        }
     }
 }

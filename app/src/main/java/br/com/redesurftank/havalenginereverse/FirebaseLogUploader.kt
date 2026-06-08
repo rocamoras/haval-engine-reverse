@@ -35,21 +35,23 @@ object FirebaseLogUploader {
             .addOnFailureListener { onError(it.message ?: "falha") }
     }
 
-    fun uploadPcap(
-        file: File,
+    /**
+     * Faz upload de bytes já lidos de um .pcap.
+     * DEVE ser chamado na main thread (Firebase usa Looper internamente).
+     */
+    fun uploadPcapBytes(
+        bytes: ByteArray,
+        fileName: String,
         onProgress: (String) -> Unit,
         onSuccess: (String) -> Unit,
         onError: (String) -> Unit
     ) {
-        if (!file.exists()) { onError("Arquivo não encontrado: ${file.path}"); return }
         onProgress("Autenticando...")
         ensureSignedIn(
             onReady = {
-                val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
-                val fileName = "pcap_$timestamp.pcap"
                 val ref = storage.reference.child("pcaps/$fileName")
-                onProgress("Enviando $fileName (${file.length() / 1024} KB)...")
-                ref.putBytes(file.readBytes())
+                onProgress("Enviando $fileName (${bytes.size / 1024} KB)...")
+                ref.putBytes(bytes)
                     .addOnSuccessListener {
                         ref.downloadUrl
                             .addOnSuccessListener { uri -> onSuccess(uri.toString()) }
