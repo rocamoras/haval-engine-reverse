@@ -1801,7 +1801,17 @@ source.startsWith("reply")         -> Color(0xFFFF8A65)
 @Composable
 private fun NetworkTab(state: EngineReverseStateHolder) {
     val scope = rememberCoroutineScope()
-    val logFile = "/sdcard/haval_capture.log"
+    val context = LocalContext.current
+
+    // Usa o diretório privado do app — sem necessidade de permissão READ_EXTERNAL_STORAGE
+    val appFilesDir = remember {
+        (context.getExternalFilesDir(null) ?: context.filesDir).absolutePath
+    }
+    val logFile  = remember { "$appFilesDir/haval_capture.log" }
+    val pcapPath = remember { "$appFilesDir/haval_capture.pcap" }
+
+    // Sincroniza o path no state para exibição e upload
+    LaunchedEffect(pcapPath) { state.tcpdumpFilePath = pcapPath }
 
     // linhas ao vivo exibidas enquanto captura
     var liveLines by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1894,19 +1904,22 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
                     liveLines = emptyList()
                     state.tcpdumpStatus = "Capturando..."
                     state.tcpdumpRunning = true
-                    // pcap binário + log texto em paralelo
+                    // pcap binário + log texto em paralelo, gravando no dir privado do app
                     runShell(
-                        "rm -f $logFile 2>/dev/null; " +
-                        "tcpdump -i any -s 0 -n -w ${state.tcpdumpFilePath} > /dev/null 2>&1 & " +
+                        "mkdir -p $appFilesDir 2>/dev/null; rm -f $logFile 2>/dev/null; " +
+                        "tcpdump -i any -s 0 -n -w $pcapPath > /dev/null 2>&1 & " +
                         "tcpdump -i any -n -l > $logFile 2>&1 &"
                     )
                 },
                 enabled = !state.tcpdumpRunning,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A5F)),
-                border = BorderStroke(1.dp, Color(0x554FC3F7)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1E3A5F),
+                    disabledContainerColor = Color(0xFF111A28)
+                ),
+                border = BorderStroke(1.dp, if (!state.tcpdumpRunning) Color(0xFF4FC3F7) else Color(0x224FC3F7)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.weight(1f)
-            ) { Text("Iniciar", color = Color(0xFF4FC3F7), fontSize = 13.sp) }
+            ) { Text("Iniciar", color = if (!state.tcpdumpRunning) Color(0xFF4FC3F7) else Color(0xFF224466), fontSize = 13.sp) }
 
             Button(
                 onClick = {
@@ -1915,15 +1928,18 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
                     runShell("pkill tcpdump")
                 },
                 enabled = state.tcpdumpRunning,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A1A1A)),
-                border = BorderStroke(1.dp, Color(0x55FFD54F)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF2A1A1A),
+                    disabledContainerColor = Color(0xFF1A1108)
+                ),
+                border = BorderStroke(1.dp, if (state.tcpdumpRunning) Color(0xFFFFD54F) else Color(0x22FFD54F)),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.weight(1f)
-            ) { Text("Parar", color = Color(0xFFFFD54F), fontSize = 13.sp) }
+            ) { Text("Parar", color = if (state.tcpdumpRunning) Color(0xFFFFD54F) else Color(0xFF443311), fontSize = 13.sp) }
         }
 
         var uploading by remember { mutableStateOf(false) }
-        val pcapFile = File(state.tcpdumpFilePath)
+        val pcapFile = File(pcapPath)
 
         Button(
             onClick = {
