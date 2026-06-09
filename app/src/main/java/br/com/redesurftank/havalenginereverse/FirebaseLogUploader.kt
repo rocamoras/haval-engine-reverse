@@ -49,7 +49,7 @@ object FirebaseLogUploader {
         onProgress("Autenticando...")
         ensureSignedIn(
             onReady = {
-                val ref = storage.reference.child("pcaps/$fileName")
+                val ref = storage.reference.child("logs/$fileName")
                 onProgress("Enviando $fileName (${bytes.size / 1024} KB)...")
                 ref.putBytes(bytes)
                     .addOnSuccessListener {
