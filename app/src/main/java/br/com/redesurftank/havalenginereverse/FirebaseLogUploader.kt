@@ -63,6 +63,32 @@ object FirebaseLogUploader {
         )
     }
 
+    fun uploadJson(
+        json: String,
+        onProgress: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        onProgress("Autenticando...")
+        ensureSignedIn(
+            onReady = {
+                val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
+                val fileName  = "proxy_$timestamp.json"
+                val ref       = storage.reference.child("logs/$fileName")
+                val bytes     = json.toByteArray(Charsets.UTF_8)
+                onProgress("Enviando $fileName (${bytes.size / 1024} KB)...")
+                ref.putBytes(bytes)
+                    .addOnSuccessListener {
+                        ref.downloadUrl
+                            .addOnSuccessListener { uri -> onSuccess(uri.toString()) }
+                            .addOnFailureListener { onSuccess(fileName) }
+                    }
+                    .addOnFailureListener { onError(it.message ?: "falha no upload") }
+            },
+            onError = { onError("Erro de autenticação: $it") }
+        )
+    }
+
     private fun doUpload(
         entries: List<EngineReverseStateHolder.EventEntry>,
         onProgress: (String) -> Unit,

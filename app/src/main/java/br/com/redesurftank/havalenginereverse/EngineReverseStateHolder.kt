@@ -118,6 +118,28 @@ object EngineReverseStateHolder {
         if (eventLog.size > 2000) eventLog.removeAt(eventLog.lastIndex)
     }
 
+    // ── Proxy HTTPS (mitm) ───────────────────────────────────────────────
+    var proxyRunning  by mutableStateOf(false)
+    var proxyStatus   by mutableStateOf("")
+    var caInstalled   by mutableStateOf(false)
+    val interceptedReqs = mutableStateListOf<ProxyEntry>()
+
+    /** Instância do servidor proxy — não é estado Compose, só referência. */
+    var proxyServer: br.com.redesurftank.havalenginereverse.utils.MitmProxyServer? = null
+
+    data class ProxyEntry(
+        val id: Long,
+        val time: String,
+        val method: String,
+        val host: String,
+        val path: String,
+        val requestHeaders: String,
+        val requestBody: String,
+        val responseCode: Int,
+        val responseHeaders: String,
+        val responseBody: String
+    )
+
     // ── Rede: tcpdump ────────────────────────────────────────────────────
     var tcpdumpRunning  by mutableStateOf(false)
     var tcpdumpFilePath by mutableStateOf("/sdcard/haval_capture.pcap")

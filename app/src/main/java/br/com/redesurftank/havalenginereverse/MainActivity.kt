@@ -2033,5 +2033,273 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
                 fontSize = 11.sp
             )
         }
+
+        // ── Seção de interceptação HTTPS ──────────────────────────────────
+        ProxySection(state = state)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seção Proxy HTTPS (mitm) — embutida na aba Rede
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ProxySection(state: EngineReverseStateHolder) {
+    val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
+    var expandedId by remember { mutableStateOf<Long?>(null) }
+    var uploadingProxy by remember { mutableStateOf(false) }
+
+    fun runShell(cmd: String, onResult: (String) -> Unit = {}) {
+        scope.launch(Dispatchers.IO) {
+            var telnet: br.com.redesurftank.havalenginereverse.utils.TelnetClientWrapper? = null
+            try {
+                telnet = br.com.redesurftank.havalenginereverse.utils.TelnetClientWrapper()
+                telnet.connect("127.0.0.1", 23)
+                val result = telnet.executeCommand(cmd, 12000)
+                withContext(Dispatchers.Main) { onResult(result) }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { state.proxyStatus = "Erro shell: ${e.message}" }
+            } finally {
+                try { telnet?.disconnect() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // ── Card de status ────────────────────────────────────────────────────
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E)),
+        shape  = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF2A1A3E)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.proxyRunning) CircularProgressIndicator(
+                    Modifier.size(12.dp), color = Color(0xFFCE93D8), strokeWidth = 1.5.dp)
+                Text(
+                    "Interceptação HTTPS",
+                    color = Color(0xFFCE93D8), fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                "CA: ${if (state.caInstalled) "Instalado ✓" else "Não instalado"}   " +
+                "Proxy: ${if (state.proxyRunning) "Ativo :${state.proxyServer?.port ?: 8443}" else "Parado"}   " +
+                "${state.interceptedReqs.size} req interceptadas",
+                color = Color(0xFF546E7A), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+            )
+            if (state.proxyStatus.isNotBlank()) Text(
+                state.proxyStatus,
+                color = when {
+                    state.proxyStatus.startsWith("Erro") -> Color(0xFFEF9A9A)
+                    state.proxyStatus.startsWith("✓")    -> Color(0xFF81C784)
+                    else -> Color(0xFFFFD54F)
+                },
+                fontSize = 11.sp, fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+
+    // ── Botões CA + Proxy ─────────────────────────────────────────────────
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+
+        // Gerar & Instalar CA
+        Button(
+            onClick = {
+                state.proxyStatus = "Gerando certificados..."
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        br.com.redesurftank.havalenginereverse.utils.ProxyCA.generate(context)
+                        val pemPath = "${context.filesDir}/${br.com.redesurftank.havalenginereverse.utils.ProxyCA.PEM_FILE}"
+                        withContext(Dispatchers.Main) { state.proxyStatus = "Instalando CA no sistema..." }
+                        // Instala via shell root
+                        runShell(
+                            "CERTPATH=$pemPath; " +
+                            "HASH=\$(openssl x509 -subject_hash_old -noout -in \$CERTPATH 2>/dev/null); " +
+                            "mount -o remount,rw /system 2>/dev/null || mount -o rw,remount /system 2>/dev/null; " +
+                            "cp \$CERTPATH /system/etc/security/cacerts/\${HASH}.0 && " +
+                            "chmod 644 /system/etc/security/cacerts/\${HASH}.0; " +
+                            "mount -o remount,ro /system 2>/dev/null || mount -o ro,remount /system 2>/dev/null; " +
+                            "echo \"DONE:\${HASH}\""
+                        ) { result ->
+                            if (result.contains("DONE:")) {
+                                state.caInstalled  = true
+                                state.proxyStatus  = "✓ CA instalado. Reinicie o headunit para ativar."
+                            } else {
+                                state.proxyStatus  = "Erro ao instalar CA: $result"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { state.proxyStatus = "Erro: ${e.message}" }
+                    }
+                }
+            },
+            enabled = !state.proxyRunning,
+            colors  = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF1A1A2E),
+                disabledContainerColor = Color(0xFF111118)
+            ),
+            border = BorderStroke(1.dp, if (!state.proxyRunning) Color(0xFFCE93D8) else Color(0x22CE93D8)),
+            shape  = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+        ) { Text("Gerar CA", color = if (!state.proxyRunning) Color(0xFFCE93D8) else Color(0xFF332233), fontSize = 12.sp) }
+
+        // Iniciar / Parar proxy
+        Button(
+            onClick = {
+                if (!state.proxyRunning) {
+                    // INICIAR
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            br.com.redesurftank.havalenginereverse.utils.ProxyCA.initialize(context)
+                            val sslCtx = br.com.redesurftank.havalenginereverse.utils.ProxyCA.serverSslContext()
+                            val server = br.com.redesurftank.havalenginereverse.utils.MitmProxyServer(8443) { entry ->
+                                state.interceptedReqs.add(0, entry)
+                                if (state.interceptedReqs.size > 500) state.interceptedReqs.removeAt(state.interceptedReqs.lastIndex)
+                            }
+                            server.start(sslCtx)
+                            withContext(Dispatchers.Main) {
+                                state.proxyServer = server
+                                state.proxyRunning = true
+                                state.proxyStatus  = "Proxy ativo. Aplicando redirecionamentos..."
+                            }
+                            // /etc/hosts + iptables
+                            runShell(
+                                "mount -o remount,rw /system 2>/dev/null || mount -o rw,remount /system 2>/dev/null; " +
+                                "grep -qF 'ap-hu-gateway' /system/etc/hosts || " +
+                                "  echo '127.0.0.1 ${br.com.redesurftank.havalenginereverse.utils.ProxyCA.TARGET_DOMAIN}' >> /system/etc/hosts; " +
+                                "mount -o remount,ro /system 2>/dev/null || mount -o ro,remount /system 2>/dev/null; " +
+                                "iptables -t nat -C OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports 8443 2>/dev/null || " +
+                                "  iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports 8443; " +
+                                "echo OK"
+                            ) { state.proxyStatus = "✓ Proxy ativo na porta 8443" }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                state.proxyRunning = false
+                                state.proxyStatus  = "Erro ao iniciar: ${e.message}"
+                            }
+                        }
+                    }
+                } else {
+                    // PARAR
+                    state.proxyServer?.stop()
+                    state.proxyServer  = null
+                    state.proxyRunning = false
+                    state.proxyStatus  = "Proxy parado. Removendo redirecionamentos..."
+                    runShell(
+                        "iptables -t nat -D OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j REDIRECT --to-ports 8443 2>/dev/null; " +
+                        "mount -o remount,rw /system 2>/dev/null || mount -o rw,remount /system 2>/dev/null; " +
+                        "sed -i '/ap-hu-gateway/d' /system/etc/hosts 2>/dev/null; " +
+                        "mount -o remount,ro /system 2>/dev/null || mount -o ro,remount /system 2>/dev/null; " +
+                        "echo OK"
+                    ) { state.proxyStatus = "Proxy parado." }
+                }
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (state.proxyRunning) Color(0xFF2A1A1A) else Color(0xFF1A1A2E),
+                disabledContainerColor = Color(0xFF111118)
+            ),
+            border = BorderStroke(1.dp, if (state.proxyRunning) Color(0xFFEF9A9A) else Color(0x88CE93D8)),
+            shape  = RoundedCornerShape(8.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                if (state.proxyRunning) "Parar" else "Iniciar Proxy",
+                color = if (state.proxyRunning) Color(0xFFEF9A9A) else Color(0xFFCE93D8),
+                fontSize = 12.sp
+            )
+        }
+    }
+
+    // ── Lista de requisições interceptadas ────────────────────────────────
+    if (state.interceptedReqs.isNotEmpty()) {
+
+        // Botão enviar interceptações
+        Button(
+            onClick = {
+                uploadingProxy = true
+                val json = buildString {
+                    append("[")
+                    state.interceptedReqs.forEachIndexed { i, e ->
+                        append("""{"time":"${e.time}","method":"${e.method}","host":"${e.host}","path":${
+                            org.json.JSONObject.quote(e.path)},"status":${e.responseCode},"requestBody":${
+                            org.json.JSONObject.quote(e.requestBody)},"responseBody":${
+                            org.json.JSONObject.quote(e.responseBody)}}""")
+                        if (i < state.interceptedReqs.lastIndex) append(",")
+                    }
+                    append("]")
+                }
+                FirebaseLogUploader.uploadJson(
+                    json       = json,
+                    onProgress = { state.proxyStatus = it },
+                    onSuccess  = { state.proxyStatus = "✓ Enviado: $it"; uploadingProxy = false },
+                    onError    = { state.proxyStatus = "Erro: $it"; uploadingProxy = false }
+                )
+            },
+            enabled = !uploadingProxy,
+            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A2E)),
+            border  = BorderStroke(1.dp, Color(0x5581C784)),
+            shape   = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (uploadingProxy) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF81C784), strokeWidth = 1.5.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("Enviar interceptações (${state.interceptedReqs.size})", color = Color(0xFF81C784), fontSize = 12.sp)
+        }
+
+        Card(
+            colors   = CardDefaults.cardColors(containerColor = Color(0xFF0A0A14)),
+            shape    = RoundedCornerShape(8.dp),
+            border   = BorderStroke(1.dp, Color(0xFF1A1A2E)),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)
+        ) {
+            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(8.dp)) {
+                items(state.interceptedReqs) { entry ->
+                    val expanded = expandedId == entry.id
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expandedId = if (expanded) null else entry.id }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${entry.time}  ${entry.method}  ${entry.path.take(60)}",
+                                color = Color(0xFF80CBC4), fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${entry.responseCode}",
+                                color = when {
+                                    entry.responseCode in 200..299 -> Color(0xFF81C784)
+                                    entry.responseCode in 400..499 -> Color(0xFFFFD54F)
+                                    else -> Color(0xFFEF9A9A)
+                                },
+                                fontSize = 10.sp, fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        if (expanded) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("── Request Headers ──", color = Color(0xFF37474F), fontSize = 9.sp)
+                            Text(entry.requestHeaders, color = Color(0xFF546E7A), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                            if (entry.requestBody.isNotBlank()) {
+                                Text("── Request Body ──", color = Color(0xFF37474F), fontSize = 9.sp)
+                                Text(entry.requestBody.take(2000), color = Color(0xFF80CBC4), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                            }
+                            Text("── Response Body ──", color = Color(0xFF37474F), fontSize = 9.sp)
+                            Text(entry.responseBody.take(2000), color = Color(0xFFCE93D8), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        HorizontalDivider(color = Color(0xFF1A1A2E), thickness = 0.5.dp)
+                    }
+                }
+            }
+        }
     }
 }

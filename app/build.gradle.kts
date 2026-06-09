@@ -15,8 +15,8 @@ android {
         applicationId = "br.com.redesurftank.havalenginereverse"
         minSdk = 28
         targetSdk = 28
-        versionCode = 25
-        versionName = "2.4.0"
+        versionCode = 26
+        versionName = "2.5.0"
     }
 
     signingConfigs {
@@ -44,6 +44,15 @@ android {
 
     lint {
         disable += "ExpiredTargetSdkVersion"
+    }
+
+    packaging {
+        resources {
+            excludes += "META-INF/BCKEY.DSA"
+            excludes += "META-INF/BCKEY.SF"
+            excludes += "META-INF/BC*.RSA"
+            excludes += "META-INF/BC*.SF"
+        }
     }
 
     buildFeatures {
@@ -80,4 +89,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.storage)
     implementation(libs.firebase.auth)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.bouncycastle:bcpkix-jdk15on:1.70")
+    implementation("org.bouncycastle:bcprov-jdk15on:1.70")
 }
