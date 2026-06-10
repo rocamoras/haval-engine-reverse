@@ -145,6 +145,10 @@ object EngineReverseStateHolder {
     var tcpdumpFilePath by mutableStateOf("/sdcard/haval_capture.pcap")
     var tcpdumpStatus   by mutableStateOf("")
 
+    // ── Diagnóstico de clima ─────────────────────────────────────────────
+    var climaScanRunning by mutableStateOf(false)
+    var climaScanResult  by mutableStateOf("")
+
     var probeRunning      by mutableStateOf(false)
     var apkScanRunning    by mutableStateOf(false)
     var dumpsysRunning    by mutableStateOf(false)

@@ -763,6 +763,95 @@ private fun TestsTab(state: EngineReverseStateHolder) {
             }
         }
 
+        // ── Seção "Forçar Clima" ─────────────────────────────────────────
+        HorizontalDivider(color = Color(0xFF2A2A3E), thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+        Text(
+            "Forçar dados de clima (Vetor 2 — AIDL)",
+            color = Color(0xFFFFCC80),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "Envia valores diretamente via Beantechs AIDL. Se o widget ler estas chaves ele mostrará os dados abaixo.",
+            color = Color(0xFF546E7A),
+            fontSize = 10.sp
+        )
+
+        val weatherKeys = listOf(
+            "car.basic.outside_temp",
+            "car.weather.condition",
+            "car.weather.icon",
+            "car.weather.city",
+            "car.weather.temperature",
+            "car.weather.humidity",
+            "car.weather.forecast"
+        )
+        val weatherDefaults = mapOf(
+            "car.basic.outside_temp" to "25",
+            "car.weather.condition"  to "Sunny",
+            "car.weather.icon"       to "sunny",
+            "car.weather.city"       to "Sao Paulo",
+            "car.weather.temperature" to "25",
+            "car.weather.humidity"   to "60",
+            "car.weather.forecast"   to "Sunny 25C"
+        )
+
+        weatherKeys.forEach { wKey ->
+            val wCurrent = state.discoveredKeys[wKey]
+            var wInput   by remember(wKey) { mutableStateOf(wCurrent ?: weatherDefaults[wKey] ?: "") }
+            LaunchedEffect(wCurrent) {
+                if (wCurrent != null) wInput = wCurrent
+            }
+            TestCard(title = wKey, currentValue = wCurrent, sentInfo = sentLog[wKey]) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = wInput,
+                        onValueChange = { wInput = it },
+                        label = { Text("Valor a forçar", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor   = Color(0xFFFFCC80),
+                            unfocusedBorderColor = Color(0xFF2A2A3E),
+                            focusedLabelColor    = Color(0xFFFFCC80),
+                            unfocusedLabelColor  = Color(0xFF546E7A),
+                            focusedTextColor     = Color(0xFFE0E0E0),
+                            unfocusedTextColor   = Color(0xFFE0E0E0),
+                            cursorColor          = Color(0xFFFFCC80)
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { sendRequest(wKey, wInput) })
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // action = cmd.common.request.set (padrão Beantechs)
+                        Button(
+                            onClick = { sendRequest(wKey, wInput) },
+                            enabled = wInput.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A1E0A)),
+                            border = BorderStroke(1.dp, Color(0xFFFFCC80)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text("req", color = Color(0xFFFFCC80), fontSize = 11.sp)
+                        }
+                        // action = cmd.common.set (variante mais curta, testada nos brute codes)
+                        Button(
+                            onClick = { sendRequest(wKey, wInput, "cmd.common.set") },
+                            enabled = wInput.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2A1A)),
+                            border = BorderStroke(1.dp, Color(0xFF81C784)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text("set", color = Color(0xFF81C784), fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         if (!state.vehicleConnected) {
             Text(
                 "⚠ Serviço não conectado — os botões ficam desabilitados até conectar.",
@@ -1776,6 +1865,140 @@ private fun ActionValueCycleCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Diagnóstico de clima — scan de packages, providers, logcat e tcp
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ClimaScanSection(state: EngineReverseStateHolder) {
+    val scope   = rememberCoroutineScope()
+    var uploading by remember { mutableStateOf(false) }
+
+    fun runShell(cmd: String, onResult: (String) -> Unit) {
+        scope.launch(Dispatchers.IO) {
+            var telnet: br.com.redesurftank.havalenginereverse.utils.TelnetClientWrapper? = null
+            try {
+                telnet = br.com.redesurftank.havalenginereverse.utils.TelnetClientWrapper()
+                telnet.connect("127.0.0.1", 23)
+                val result = telnet.executeCommand(cmd, 20000)
+                withContext(Dispatchers.Main) { onResult(result) }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onResult("Erro: ${e.message}") }
+            } finally {
+                try { telnet?.disconnect() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    val scanCmd = """
+echo "=== LAUNCHER/WEATHER PACKAGES ===" &&
+pm list packages 2>/dev/null | grep -i -E "(launcher|gwm|haval|weather|clima|oem|home|desktop)" &&
+echo "=== ACTIVITY FOREGROUND ===" &&
+dumpsys activity top 2>/dev/null | head -25 &&
+echo "=== CONTENT PROVIDERS ===" &&
+dumpsys activity providers 2>/dev/null | grep -i -E "(weather|clima|gwm|temp)" | head -20 &&
+echo "=== LOGCAT WEATHER ===" &&
+logcat -d -t 300 2>/dev/null | grep -i -E "(weather|clima|gwmcloud|outside.temp|forecast|openweather|aqi)" | tail -30 &&
+echo "=== TCP CONNECTIONS 443 ===" &&
+cat /proc/net/tcp6 2>/dev/null | awk 'NR>1{print $3}' | grep -i "01BB" | head -10 &&
+netstat -tn 2>/dev/null | grep ":443 " | head -10 &&
+echo "=== SERVICE LIST WEATHER ===" &&
+service list 2>/dev/null | grep -i -E "(weather|clima|gwm)" | head -10 &&
+echo "=== DONE ==="
+    """.trimIndent().replace("\n", " ")
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E)),
+        shape  = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF2A3A1A)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.climaScanRunning) CircularProgressIndicator(
+                    Modifier.size(12.dp), color = Color(0xFFFFCC80), strokeWidth = 1.5.dp)
+                Text(
+                    "Diagnóstico de Clima",
+                    color = Color(0xFFFFCC80), fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                "Identifica qual package/processo gerencia o clima e quais ContentProviders existem.",
+                color = Color(0xFF546E7A), fontSize = 10.sp
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = {
+                        state.climaScanRunning = true
+                        state.climaScanResult  = "Executando scan..."
+                        runShell(scanCmd) { result ->
+                            state.climaScanRunning = false
+                            state.climaScanResult  = result.ifBlank { "(sem saída)" }
+                        }
+                    },
+                    enabled = !state.climaScanRunning,
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2A2A0A),
+                        disabledContainerColor = Color(0xFF1A1A08)
+                    ),
+                    border = BorderStroke(1.dp, if (!state.climaScanRunning) Color(0xFFFFCC80) else Color(0x22FFCC80)),
+                    shape  = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Scan Clima", color = if (!state.climaScanRunning) Color(0xFFFFCC80) else Color(0xFF443311), fontSize = 12.sp) }
+
+                Button(
+                    onClick = {
+                        uploading = true
+                        val ts = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.getDefault())
+                            .format(java.util.Date())
+                        FirebaseLogUploader.uploadJson(
+                            json       = org.json.JSONObject.quote(state.climaScanResult),
+                            onProgress = { state.climaScanResult = "Enviando..." },
+                            onSuccess  = { state.climaScanResult = "✓ Enviado: $it"; uploading = false },
+                            onError    = { state.climaScanResult = "Erro: $it"; uploading = false }
+                        )
+                    },
+                    enabled = !uploading && state.climaScanResult.isNotBlank()
+                            && !state.climaScanRunning && state.climaScanResult != "Executando scan...",
+                    colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2A1A)),
+                    border  = BorderStroke(1.dp, Color(0x5581C784)),
+                    shape   = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (uploading) {
+                        CircularProgressIndicator(Modifier.size(12.dp), color = Color(0xFF81C784), strokeWidth = 1.5.dp)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text("Enviar", color = Color(0xFF81C784), fontSize = 12.sp)
+                }
+            }
+
+            if (state.climaScanResult.isNotBlank()) {
+                Card(
+                    colors   = CardDefaults.cardColors(containerColor = Color(0xFF0A0A14)),
+                    shape    = RoundedCornerShape(6.dp),
+                    border   = BorderStroke(1.dp, Color(0xFF1A2A0A)),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)
+                ) {
+                    val scrollState = rememberScrollState()
+                    LaunchedEffect(state.climaScanResult) { scrollState.animateScrollTo(0) }
+                    Text(
+                        state.climaScanResult,
+                        color = Color(0xFFB0BEC5),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(scrollState)
+                            .padding(8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 private fun sourceColor(source: String): Color = when {
     source.startsWith("listener")      -> Color(0xFF81C784)
@@ -2036,6 +2259,9 @@ private fun NetworkTab(state: EngineReverseStateHolder) {
 
         // ── Seção de interceptação HTTPS ──────────────────────────────────
         ProxySection(state = state)
+
+        // ── Diagnóstico de clima ──────────────────────────────────────────
+        ClimaScanSection(state = state)
     }
 }
 
