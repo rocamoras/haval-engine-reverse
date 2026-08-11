@@ -6,11 +6,19 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import java.util.concurrent.atomic.AtomicLong
 
 private const val PREFS_NAME = "engine_reverse_prefs"
 private const val KEY_PINNED  = "pinned_keys"
 private const val KEY_IGNORED = "ignored_keys"
+private const val KEY_MIRROR_ENABLED = "mirror_temp_enabled"
+private const val KEY_MIRROR_TARGET  = "mirror_temp_target"
+
+/** Chave do sensor real de temperatura externa (telemetria read-only do barramento). */
+const val OUTSIDE_TEMP_SENSOR_KEY = "car.basic.outside_temp"
+/** Chave-alvo padrão onde o valor do sensor é espelhado para aparecer na tela OEM. */
+const val DEFAULT_MIRROR_TARGET_KEY = "car.configure.outside_temp_display"
 private const val SEPARATOR   = "" // ASCII Unit Separator — nunca aparece em nomes de chaves
 
 object EngineReverseStateHolder {
@@ -31,6 +39,9 @@ object EngineReverseStateHolder {
         val ignored = p.getString(KEY_IGNORED, null)
         if (!pinned.isNullOrEmpty())  pinnedKeys.addAll(pinned.split(SEPARATOR))
         if (!ignored.isNullOrEmpty()) ignoredKeys.addAll(ignored.split(SEPARATOR))
+        mirrorTempEnabled   = p.getBoolean(KEY_MIRROR_ENABLED, false)
+        mirrorTempTargetKey = p.getString(KEY_MIRROR_TARGET, DEFAULT_MIRROR_TARGET_KEY)
+            ?: DEFAULT_MIRROR_TARGET_KEY
     }
 
     private fun savePinned() {
@@ -101,6 +112,10 @@ object EngineReverseStateHolder {
     )
 
     fun onEventReceived(key: String, value: String, source: String) {
+        // Espelhamento: dispara ANTES do filtro de ignorados para não depender da UI.
+        if (key == OUTSIDE_TEMP_SENSOR_KEY) {
+            UniversalMonitorService.onOutsideTempSensorChanged(value)
+        }
         // Chaves ignoradas não recebem mais atualizações na grid
         if (ignoredKeys.contains(key)) return
         discoveredKeys[key] = value
@@ -148,6 +163,31 @@ object EngineReverseStateHolder {
     // ── Diagnóstico de clima ─────────────────────────────────────────────
     var climaScanRunning by mutableStateOf(false)
     var climaScanResult  by mutableStateOf("")
+
+    // ── Temperatura na tela (espelhamento sensor → chave de display) ──────
+    // Fonte da verdade é persistida em prefs; o serviço lê/aplica. A UI reflete e altera via intents.
+    var mirrorTempEnabled   by mutableStateOf(false)
+    var mirrorTempTargetKey by mutableStateOf(DEFAULT_MIRROR_TARGET_KEY)
+    var mirrorTempStatus    by mutableStateOf("")
+
+    // ── Exportação de APKs OEM ────────────────────────────────────────────
+    var oemApkExportRunning by mutableStateOf(false)
+    var oemApkExportResult  by mutableStateOf("")
+
+    /**
+     * Ponte para o serviço: chamado a cada novo valor do sensor de temperatura externa.
+     * O serviço registra este hook (via campos estáticos) e faz a escrita AIDL na chave-alvo.
+     * Mantido como lambda simples para desacoplar StateHolder (UI) do serviço.
+     */
+    @JvmStatic
+    fun persistMirrorConfig(enabled: Boolean, targetKey: String) {
+        mirrorTempEnabled = enabled
+        mirrorTempTargetKey = targetKey
+        prefs()?.edit()
+            ?.putBoolean(KEY_MIRROR_ENABLED, enabled)
+            ?.putString(KEY_MIRROR_TARGET, targetKey)
+            ?.apply()
+    }
 
     var probeRunning      by mutableStateOf(false)
     var apkScanRunning    by mutableStateOf(false)

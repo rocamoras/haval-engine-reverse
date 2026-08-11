@@ -85,7 +85,30 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     public static final String ACTION_CHECK_SPEECH_PACKAGE  = "br.com.redesurftank.havalenginereverse.CHECK_SPEECH_PACKAGE";
     public static final String ACTION_TOGGLE_SPEECH_PACKAGE = "br.com.redesurftank.havalenginereverse.TOGGLE_SPEECH_PACKAGE";
 
+    /** Trilho 1 — espelha o sensor real de temperatura externa numa chave que a tela OEM lê. */
+    public static final String ACTION_SET_TEMP_MIRROR      = "br.com.redesurftank.havalenginereverse.SET_TEMP_MIRROR";
+    public static final String EXTRA_MIRROR_ENABLED        = "mirror_enabled";
+    public static final String EXTRA_MIRROR_TARGET_KEY     = "mirror_target_key";
+    /** Escreve um valor de teste numa chave (probe) — usado para descobrir qual chave a tela lê. */
+    public static final String ACTION_PROBE_TEMP_KEY       = "br.com.redesurftank.havalenginereverse.PROBE_TEMP_KEY";
+
+    /** Trilho 2 — copia os APKs OEM (weatherservice/launcher/systemui) para pasta acessível. */
+    public static final String ACTION_EXPORT_OEM_APKS      = "br.com.redesurftank.havalenginereverse.EXPORT_OEM_APKS";
+
     private static final String SPEECH_PACKAGE = "com.iflytek.cutefly.speechclient.hmi";
+
+    private static final String OUTSIDE_TEMP_SENSOR_KEY   = "car.basic.outside_temp";
+    private static final String DEFAULT_MIRROR_TARGET_KEY = "car.configure.outside_temp_display";
+    private static final String PREF_MIRROR_ENABLED        = "mirror_temp_enabled";
+    private static final String PREF_MIRROR_TARGET         = "mirror_temp_target";
+    /** Reaplica o valor periodicamente para sobreviver a sobrescritas do OEM. */
+    private static final long   MIRROR_REAPPLY_INTERVAL_MS = 30_000L;
+
+    // Fonte da verdade do espelhamento (estática p/ ser acessível a partir do StateHolder).
+    private static volatile UniversalMonitorService sInstance;
+    private static volatile boolean sMirrorActive = false;
+    private static volatile String  sMirrorTargetKey = DEFAULT_MIRROR_TARGET_KEY;
+    private volatile String lastOutsideTemp = null;
 
     /**
      * Estratégia 5 — Active Probe.
@@ -1005,11 +1028,69 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         createNotificationChannel();
         handlerThread = new HandlerThread("EngineReverseThread");
         handlerThread.start();
         backgroundHandler = new Handler(handlerThread.getLooper());
+
+        // Restaura config de espelhamento persistida (sobrevive a reboot/OTA via BootReceiver).
+        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        sMirrorActive = p.getBoolean(PREF_MIRROR_ENABLED, false);
+        sMirrorTargetKey = p.getString(PREF_MIRROR_TARGET, DEFAULT_MIRROR_TARGET_KEY);
+        EngineReverseStateHolder.INSTANCE.persistMirrorConfig(sMirrorActive, sMirrorTargetKey);
+        if (sMirrorActive) {
+            EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Espelhamento ligado — aguardando sensor…");
+            backgroundHandler.postDelayed(mirrorReapplyRunnable, MIRROR_REAPPLY_INTERVAL_MS);
+        }
     }
+
+    /**
+     * Chamado pelo StateHolder a cada novo valor do sensor real de temperatura externa.
+     * Guarda o último valor e, se o espelhamento estiver ligado, escreve na chave-alvo.
+     */
+    public static void onOutsideTempSensorChanged(String value) {
+        UniversalMonitorService s = sInstance;
+        if (s == null || value == null || value.isEmpty()) return;
+        s.lastOutsideTemp = value;
+        if (sMirrorActive) s.applyMirrorWrite(value);
+    }
+
+    /** Escreve o valor na chave-alvo via AIDL (mesmo caminho de cmd.common.request.set). */
+    private void applyMirrorWrite(String value) {
+        if (backgroundHandler == null) return;
+        backgroundHandler.post(() -> {
+            try {
+                if (controlService == null) {
+                    EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Sem conexão — não aplicado");
+                    return;
+                }
+                controlService.request("cmd.common.request.set", sMirrorTargetKey, value);
+                EngineReverseStateHolder.INSTANCE.onEventReceived(sMirrorTargetKey, value, "mirror");
+                EngineReverseStateHolder.INSTANCE.setMirrorTempStatus(
+                        "Aplicado: " + sMirrorTargetKey + " = " + value + "°");
+                Log.w(TAG, "[mirror] " + sMirrorTargetKey + " = " + value);
+            } catch (Exception e) {
+                Log.e(TAG, "[mirror] falhou: " + e.getMessage(), e);
+                EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Erro: " + e.getMessage());
+            }
+        });
+    }
+
+    /** Reaplica o último valor conhecido a cada intervalo — enquanto o espelhamento estiver ligado. */
+    private final Runnable mirrorReapplyRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!sMirrorActive) return;
+            String v = lastOutsideTemp;
+            if (v == null) {
+                // Ainda não recebeu evento? tenta o valor já descoberto na grid.
+                v = EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().get(OUTSIDE_TEMP_SENSOR_KEY);
+            }
+            if (v != null && !v.isEmpty()) applyMirrorWrite(v);
+            if (backgroundHandler != null) backgroundHandler.postDelayed(this, MIRROR_REAPPLY_INTERVAL_MS);
+        }
+    };
 
     @Override
     public synchronized int onStartCommand(Intent intent, int flags, int startId) {
@@ -1089,6 +1170,61 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             }
             if (ACTION_TOGGLE_SPEECH_PACKAGE.equals(action)) {
                 backgroundHandler.post(this::toggleSpeechPackage);
+                return START_STICKY;
+            }
+            if (ACTION_SET_TEMP_MIRROR.equals(action)) {
+                boolean enabled = intent.getBooleanExtra(EXTRA_MIRROR_ENABLED, false);
+                String target = intent.getStringExtra(EXTRA_MIRROR_TARGET_KEY);
+                if (target != null && !target.isEmpty()) sMirrorTargetKey = target;
+                sMirrorActive = enabled;
+                SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                p.edit().putBoolean(PREF_MIRROR_ENABLED, enabled)
+                        .putString(PREF_MIRROR_TARGET, sMirrorTargetKey).apply();
+                EngineReverseStateHolder.INSTANCE.persistMirrorConfig(enabled, sMirrorTargetKey);
+                backgroundHandler.removeCallbacks(mirrorReapplyRunnable);
+                if (enabled) {
+                    if (lastOutsideTemp == null) {
+                        lastOutsideTemp = EngineReverseStateHolder.INSTANCE
+                                .getDiscoveredKeys().get(OUTSIDE_TEMP_SENSOR_KEY);
+                    }
+                    if (lastOutsideTemp != null) applyMirrorWrite(lastOutsideTemp);
+                    else EngineReverseStateHolder.INSTANCE
+                            .setMirrorTempStatus("Ligado — aguardando 1ª leitura do sensor…");
+                    backgroundHandler.postDelayed(mirrorReapplyRunnable, MIRROR_REAPPLY_INTERVAL_MS);
+                } else {
+                    EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Espelhamento desligado");
+                }
+                return START_STICKY;
+            }
+            if (ACTION_PROBE_TEMP_KEY.equals(action)) {
+                String key = intent.getStringExtra(EXTRA_REQ_KEY);
+                String value = intent.getStringExtra(EXTRA_REQ_VALUE);
+                if (key != null && !key.isEmpty()) {
+                    final String fk = key;
+                    final String fv = value != null ? value : "";
+                    backgroundHandler.post(() -> {
+                        try {
+                            if (controlService == null) {
+                                EngineReverseStateHolder.INSTANCE
+                                        .setMirrorTempStatus("Probe: sem conexão");
+                                return;
+                            }
+                            controlService.request("cmd.common.request.set", fk, fv);
+                            EngineReverseStateHolder.INSTANCE.onEventReceived(fk, fv, "probe-temp");
+                            EngineReverseStateHolder.INSTANCE
+                                    .setMirrorTempStatus("Probe enviado: " + fk + " = " + fv
+                                            + " — veja se a tela mudou");
+                            Log.w(TAG, "[probe-temp] " + fk + " = " + fv);
+                        } catch (Exception e) {
+                            EngineReverseStateHolder.INSTANCE
+                                    .setMirrorTempStatus("Probe erro: " + e.getMessage());
+                        }
+                    });
+                }
+                return START_STICKY;
+            }
+            if (ACTION_EXPORT_OEM_APKS.equals(action)) {
+                backgroundHandler.post(this::runExportOemApks);
                 return START_STICKY;
             }
         }
@@ -1339,6 +1475,8 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     public void onDestroy() {
         super.onDestroy();
         isServiceRunning = false;
+        if (backgroundHandler != null) backgroundHandler.removeCallbacks(mirrorReapplyRunnable);
+        if (sInstance == this) sInstance = null;
         if (handlerThread != null) handlerThread.quitSafely();
     }
 
@@ -1378,6 +1516,68 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         } catch (Exception e) {
             Log.e(TAG, "[speech] toggleSpeechPackage falhou: " + e.getMessage(), e);
             EngineReverseStateHolder.INSTANCE.setSpeechPackageLoading(false);
+        }
+    }
+
+    // ── Trilho 2: exportar APKs OEM para engenharia reversa ───────────────
+
+    private void runExportOemApks() {
+        if (EngineReverseStateHolder.INSTANCE.getOemApkExportRunning()) return;
+        EngineReverseStateHolder.INSTANCE.setOemApkExportRunning(true);
+        EngineReverseStateHolder.INSTANCE.setOemApkExportResult("Procurando pacotes OEM…");
+        String destDir = "/sdcard/Download/haval-oem-apks";
+        StringBuilder report = new StringBuilder();
+        try {
+            // Alvos explícitos + descoberta por palavra-chave (nome do pacote).
+            Set<String> targets = new TreeSet<>(Arrays.asList(
+                    "com.beantechs.weatherservice",
+                    "com.beantechs.launcher",
+                    "com.android.systemui"));
+            PackageManager pm = getPackageManager();
+            List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+            String[] kw = {"weather", "launcher", "systemui", "statusbar", "desktop", "hmi"};
+            for (ApplicationInfo app : apps) {
+                String n = app.packageName.toLowerCase();
+                for (String k : kw) { if (n.contains(k)) { targets.add(app.packageName); break; } }
+            }
+
+            runShell("mkdir -p " + destDir + " && chmod 777 " + destDir, 8000);
+            int ok = 0;
+            for (String pkg : targets) {
+                ApplicationInfo ai;
+                try {
+                    ai = pm.getApplicationInfo(pkg, 0);
+                } catch (Exception notInstalled) {
+                    continue; // pacote não existe neste head unit
+                }
+                List<String> srcs = new ArrayList<>();
+                if (ai.sourceDir != null) srcs.add(ai.sourceDir);
+                if (ai.splitSourceDirs != null) srcs.addAll(Arrays.asList(ai.splitSourceDirs));
+                for (int i = 0; i < srcs.size(); i++) {
+                    String src = srcs.get(i);
+                    String outName = pkg + (i == 0 ? ".apk" : "_split" + i + ".apk");
+                    String dst = destDir + "/" + outName;
+                    runShell("cp -f '" + src + "' '" + dst + "' && chmod 644 '" + dst + "'", 20000);
+                    String ls = runShell("ls -la '" + dst + "' 2>/dev/null", 6000).trim();
+                    if (!ls.isEmpty()) {
+                        ok++;
+                        report.append("✓ ").append(outName).append('\n')
+                              .append("   ").append(ls).append('\n');
+                    } else {
+                        report.append("✗ falhou: ").append(pkg).append(" (").append(src).append(")\n");
+                    }
+                }
+            }
+            String header = ok + " APK(s) copiado(s) para:\n" + destDir + "\n\n" +
+                    "Puxe com:\n  adb pull " + destDir + "\n\n";
+            EngineReverseStateHolder.INSTANCE.setOemApkExportResult(header + report);
+            Log.w(TAG, "[export-apks] " + ok + " apks → " + destDir);
+        } catch (Exception e) {
+            Log.e(TAG, "[export-apks] erro: " + e.getMessage(), e);
+            EngineReverseStateHolder.INSTANCE.setOemApkExportResult(
+                    "Erro: " + e.getMessage() + "\n" + report);
+        } finally {
+            EngineReverseStateHolder.INSTANCE.setOemApkExportRunning(false);
         }
     }
 }

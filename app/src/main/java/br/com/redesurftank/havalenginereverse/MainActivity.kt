@@ -360,6 +360,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 5,
+                onClick = { selectedTab = 5 },
+                text = {
+                    Text(
+                        "Tela",
+                        color = if (selectedTab == 5) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -369,6 +380,255 @@ fun DiscoveryScreen() {
             2 -> LogsTab(state = state)
             3 -> ActionsTab(state = state)
             4 -> NetworkTab(state = state)
+            5 -> ScreenTempTab(state = state)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tela: Temperatura externa real na tela (probe + espelhamento) + export APKs OEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ScreenTempTab(state: EngineReverseStateHolder) {
+    val context = LocalContext.current
+
+    val sensorValue = state.discoveredKeys[OUTSIDE_TEMP_SENSOR_KEY]
+
+    val candidateKeys = listOf(
+        "car.configure.outside_temp_display",
+        "car.weather.temperature",
+        "car.weather.outside_temp",
+        "car.basic.outside_temp"
+    )
+    var probeValue    by remember { mutableStateOf("7") }
+    var selectedTarget by remember { mutableStateOf(state.mirrorTempTargetKey) }
+    var customKey     by remember { mutableStateOf("") }
+    LaunchedEffect(state.mirrorTempTargetKey) { selectedTarget = state.mirrorTempTargetKey }
+
+    fun sendProbe(key: String, value: String) {
+        if (key.isBlank()) return
+        context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+            action = UniversalMonitorService.ACTION_PROBE_TEMP_KEY
+            putExtra(UniversalMonitorService.EXTRA_REQ_KEY, key)
+            putExtra(UniversalMonitorService.EXTRA_REQ_VALUE, value)
+        })
+    }
+    fun setMirror(enabled: Boolean, target: String) {
+        context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+            action = UniversalMonitorService.ACTION_SET_TEMP_MIRROR
+            putExtra(UniversalMonitorService.EXTRA_MIRROR_ENABLED, enabled)
+            putExtra(UniversalMonitorService.EXTRA_MIRROR_TARGET_KEY, target)
+        })
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "Temperatura externa real na tela",
+            color = Color(0xFF4FC3F7), fontSize = 15.sp, fontWeight = FontWeight.Bold
+        )
+        Text(
+            "O sensor real do carro é car.basic.outside_temp. A tela OEM mostra o clima online " +
+                "(weatherservice). Aqui você descobre qual chave a tela lê (Probe) e depois espelha " +
+                "o sensor real nela automaticamente.",
+            color = Color(0xFF546E7A), fontSize = 10.sp
+        )
+
+        // ── Card 1: leitura ao vivo do sensor real ───────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, Color(0x334FC3F7))
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Sensor real (car.basic.outside_temp)",
+                    color = Color(0xFF546E7A), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (sensorValue != null) "$sensorValue°C" else "— (aguardando leitura)",
+                    color = if (sensorValue != null) Color(0xFF81C784) else Color(0xFF546E7A),
+                    fontSize = 26.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // ── Card 2: Probe — descobrir a chave que a tela lê ──────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, Color(0x33FFCC80))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("1) Probe — qual chave move o número na tela?",
+                    color = Color(0xFFFFCC80), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Envie um valor óbvio e observe a barra de status da tela central. " +
+                    "A chave que mudar o número é a certa.",
+                    color = Color(0xFF546E7A), fontSize = 10.sp)
+                OutlinedTextField(
+                    value = probeValue,
+                    onValueChange = { probeValue = it },
+                    label = { Text("Valor de teste", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFFFCC80),
+                        unfocusedBorderColor = Color(0xFF2A2A3E),
+                        focusedTextColor = Color(0xFFE0E0E0),
+                        unfocusedTextColor = Color(0xFFE0E0E0),
+                        cursorColor = Color(0xFFFFCC80)
+                    )
+                )
+                candidateKeys.forEach { key ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(key, color = Color(0xFFB0BEC5), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Button(
+                            onClick = { sendProbe(key, probeValue) },
+                            enabled = state.vehicleConnected && probeValue.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A2F1E)),
+                            border = BorderStroke(1.dp, Color(0x55FFCC80)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) { Text("Testar", color = Color(0xFFFFCC80), fontSize = 11.sp) }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = customKey,
+                        onValueChange = { customKey = it },
+                        label = { Text("Outra chave…", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFFFFCC80),
+                            unfocusedBorderColor = Color(0xFF2A2A3E),
+                            focusedTextColor = Color(0xFFE0E0E0),
+                            unfocusedTextColor = Color(0xFFE0E0E0),
+                            cursorColor = Color(0xFFFFCC80)
+                        )
+                    )
+                    Button(
+                        onClick = { sendProbe(customKey.trim(), probeValue) },
+                        enabled = state.vehicleConnected && customKey.isNotBlank() && probeValue.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A2F1E)),
+                        border = BorderStroke(1.dp, Color(0x55FFCC80)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    ) { Text("Testar", color = Color(0xFFFFCC80), fontSize = 11.sp) }
+                }
+            }
+        }
+
+        // ── Card 3: Espelhamento contínuo ────────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, if (state.mirrorTempEnabled) Color(0x5581C784) else Color(0x334FC3F7))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("2) Espelhar sensor → tela",
+                            color = Color(0xFF81C784), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Escreve o sensor real na chave escolhida e reaplica a cada 30s.",
+                            color = Color(0xFF546E7A), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = state.mirrorTempEnabled,
+                        onCheckedChange = { setMirror(it, selectedTarget) },
+                        enabled = state.vehicleConnected,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF81C784),
+                            checkedTrackColor = Color(0x5581C784)
+                        )
+                    )
+                }
+                Text("Chave-alvo:", color = Color(0xFF546E7A), fontSize = 10.sp)
+                candidateKeys.forEach { key ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selectedTarget = key
+                                if (state.mirrorTempEnabled) setMirror(true, key)
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RadioButton(
+                            selected = selectedTarget == key,
+                            onClick = {
+                                selectedTarget = key
+                                if (state.mirrorTempEnabled) setMirror(true, key)
+                            },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = Color(0xFF81C784),
+                                unselectedColor = Color(0xFF546E7A)
+                            )
+                        )
+                        Text(key, color = Color(0xFFB0BEC5), fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (state.mirrorTempStatus.isNotBlank()) {
+                    Text(state.mirrorTempStatus, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        // ── Card 4: Exportar APKs OEM ────────────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, Color(0x33B39DDB))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("3) Exportar APKs OEM (para reverter)",
+                    color = Color(0xFFB39DDB), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Copia weatherservice/launcher/systemui para /sdcard/Download/haval-oem-apks. " +
+                    "Se o Probe não achar chave escrevível, mande esses APKs pra descobrir como a tela lê a temperatura.",
+                    color = Color(0xFF546E7A), fontSize = 10.sp)
+                Button(
+                    onClick = {
+                        context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+                            action = UniversalMonitorService.ACTION_EXPORT_OEM_APKS
+                        })
+                    },
+                    enabled = !state.oemApkExportRunning,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E2640)),
+                    border = BorderStroke(1.dp, Color(0x55B39DDB))
+                ) {
+                    if (state.oemApkExportRunning) {
+                        CircularProgressIndicator(Modifier.size(16.dp), color = Color(0xFFB39DDB), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Exportar APKs OEM", color = Color(0xFFB39DDB), fontSize = 12.sp)
+                }
+                if (state.oemApkExportResult.isNotBlank()) {
+                    Text(state.oemApkExportResult, color = Color(0xFFB0BEC5), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+            }
         }
     }
 }
