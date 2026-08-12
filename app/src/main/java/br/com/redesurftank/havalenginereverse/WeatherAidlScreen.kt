@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,6 +56,10 @@ fun WeatherAidlTab() {
     }
 
     // Client vive enquanto a aba está composta; desconecta ao sair.
+    val scope = rememberCoroutineScope()
+    var updBusy by remember { mutableStateOf(false) }
+    var updMsg  by remember { mutableStateOf("") }
+
     val client = remember {
         OemWeatherClient(context).apply {
             onStatus = { isConn, msg -> main.post { connected = isConn; addLog(msg) } }
@@ -84,6 +89,33 @@ fun WeatherAidlTab() {
                 "tela da home consome. Sem probe, sem overlay — dado real e oficial.",
             color = Color(0xFF90A4AE), fontSize = 11.sp
         )
+
+        // ── Card: instalar/atualizar pela central (telnet root) ──────────
+        WxCard {
+            Text("Instalar pela central (telnet)", color = Color(0xFF80CBC4), fontSize = 12.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                "Baixa o APK da release/latest e instala via telnet root (127.0.0.1:23) — " +
+                    "sem cabo, sem tap do instalador. O app reinicia ao concluir.",
+                color = Color(0xFF90A4AE), fontSize = 10.sp
+            )
+            WxButton(
+                if (updBusy) "instalando…" else "baixar + instalar via telnet",
+                enabled = !updBusy, Color(0xFF6A1B9A)
+            ) {
+                if (!updBusy) {
+                    updBusy = true; updMsg = "iniciando…"
+                    scope.launch {
+                        installLatestViaTelnet(context) { m -> updMsg = m }
+                        updBusy = false
+                    }
+                }
+            }
+            if (updMsg.isNotBlank()) {
+                Text(updMsg, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace)
+            }
+        }
 
         // ── Card: temperatura ao vivo ────────────────────────────────────
         WxCard {
