@@ -99,6 +99,10 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     public static final String ACTION_SET_OVERLAY          = "br.com.redesurftank.havalenginereverse.SET_OVERLAY";
     public static final String EXTRA_OVERLAY_ENABLED       = "overlay_enabled";
 
+    /** Frida: injeta/encerra o hook do SystemUI (barra nativa). */
+    public static final String ACTION_FRIDA_INJECT         = "br.com.redesurftank.havalenginereverse.FRIDA_INJECT";
+    public static final String ACTION_FRIDA_STOP           = "br.com.redesurftank.havalenginereverse.FRIDA_STOP";
+
     private static final String SPEECH_PACKAGE = "com.iflytek.cutefly.speechclient.hmi";
 
     private static final String OUTSIDE_TEMP_SENSOR_KEY   = "car.basic.outside_temp";
@@ -1357,6 +1361,25 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                 EngineReverseStateHolder.INSTANCE.setOverlayEnabled(enabled);
                 if (enabled) backgroundHandler.post(this::enableOverlayInternal);
                 else removeOverlayView();
+                return START_STICKY;
+            }
+            if (ACTION_FRIDA_INJECT.equals(action)) {
+                EngineReverseStateHolder.INSTANCE.setFridaBusy(true);
+                EngineReverseStateHolder.INSTANCE.setFridaStatus("Injetando…");
+                backgroundHandler.post(() -> {
+                    String r = br.com.redesurftank.havalenginereverse.utils.FridaUtils.startAndInject();
+                    EngineReverseStateHolder.INSTANCE.setFridaStatus(r);
+                    EngineReverseStateHolder.INSTANCE.setFridaBusy(false);
+                });
+                return START_STICKY;
+            }
+            if (ACTION_FRIDA_STOP.equals(action)) {
+                EngineReverseStateHolder.INSTANCE.setFridaBusy(true);
+                backgroundHandler.post(() -> {
+                    String r = br.com.redesurftank.havalenginereverse.utils.FridaUtils.stop();
+                    EngineReverseStateHolder.INSTANCE.setFridaStatus(r);
+                    EngineReverseStateHolder.INSTANCE.setFridaBusy(false);
+                });
                 return START_STICKY;
             }
         }

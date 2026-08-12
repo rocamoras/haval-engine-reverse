@@ -181,6 +181,10 @@ object EngineReverseStateHolder {
     var overlayEnabled by mutableStateOf(false)
     var overlayStatus  by mutableStateOf("")
 
+    // ── Frida (hook da barra nativa) ──────────────────────────────────────
+    var fridaBusy   by mutableStateOf(false)
+    var fridaStatus by mutableStateOf("")
+
     /**
      * Ponte para o serviço: chamado a cada novo valor do sensor de temperatura externa.
      * O serviço registra este hook (via campos estáticos) e faz a escrita AIDL na chave-alvo.

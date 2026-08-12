@@ -524,6 +524,55 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
             }
         }
 
+        // ── Card 1c: Frida (barra nativa) ────────────────────────────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, Color(0x33FF8A65))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Barra nativa via Frida (avançado)",
+                    color = Color(0xFFFF8A65), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Injeta um hook no SystemUI que destrava a temperatura real na barra nativa " +
+                    "(a trava de fábrica é BuildConfig.type=2). Requer o APK 'fat' com binários Frida. " +
+                    "Roda 'setenforce 0'; o SystemUI pode piscar ao injetar.",
+                    color = Color(0xFF546E7A), fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+                                action = UniversalMonitorService.ACTION_FRIDA_INJECT
+                            })
+                        },
+                        enabled = !state.fridaBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3A2A20)),
+                        border = BorderStroke(1.dp, Color(0x55FF8A65))
+                    ) {
+                        if (state.fridaBusy) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Color(0xFFFF8A65), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("Injetar", color = Color(0xFFFF8A65), fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = {
+                            context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+                                action = UniversalMonitorService.ACTION_FRIDA_STOP
+                            })
+                        },
+                        enabled = !state.fridaBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2A2A)),
+                        border = BorderStroke(1.dp, Color(0x55546E7A))
+                    ) { Text("Parar", color = Color(0xFFB0BEC5), fontSize = 12.sp) }
+                }
+                if (state.fridaStatus.isNotBlank()) {
+                    Text(state.fridaStatus, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
         // ── Card 2: Probe — descobrir a chave que a tela lê ──────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
