@@ -95,6 +95,10 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     /** Trilho 2 — copia os APKs OEM (weatherservice/launcher/systemui) para pasta acessível. */
     public static final String ACTION_EXPORT_OEM_APKS      = "br.com.redesurftank.havalenginereverse.EXPORT_OEM_APKS";
 
+    /** Overlay: desenha a temperatura externa real por cima da tela. */
+    public static final String ACTION_SET_OVERLAY          = "br.com.redesurftank.havalenginereverse.SET_OVERLAY";
+    public static final String EXTRA_OVERLAY_ENABLED       = "overlay_enabled";
+
     private static final String SPEECH_PACKAGE = "com.iflytek.cutefly.speechclient.hmi";
 
     private static final String OUTSIDE_TEMP_SENSOR_KEY   = "car.basic.outside_temp";
@@ -109,6 +113,16 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     private static volatile boolean sMirrorActive = false;
     private static volatile String  sMirrorTargetKey = DEFAULT_MIRROR_TARGET_KEY;
     private volatile String lastOutsideTemp = null;
+
+    // ── Overlay ───────────────────────────────────────────────────────────
+    private static final String PREF_OVERLAY_ENABLED = "overlay_temp_enabled";
+    private static final String PREF_OVERLAY_X = "overlay_temp_x";
+    private static final String PREF_OVERLAY_Y = "overlay_temp_y";
+    private static volatile boolean sOverlayActive = false;
+    private android.os.Handler mainHandler;
+    private android.view.WindowManager mWindowManager;
+    private android.widget.TextView mOverlayText;
+    private android.view.WindowManager.LayoutParams mOverlayLp;
 
     /**
      * Estratégia 5 — Active Probe.
@@ -1033,6 +1047,8 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         handlerThread = new HandlerThread("EngineReverseThread");
         handlerThread.start();
         backgroundHandler = new Handler(handlerThread.getLooper());
+        mainHandler = new Handler(Looper.getMainLooper());
+        mWindowManager = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
 
         // Restaura config de espelhamento persistida (sobrevive a reboot/OTA via BootReceiver).
         SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -1042,6 +1058,11 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         if (sMirrorActive) {
             EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Espelhamento ligado — aguardando sensor…");
             backgroundHandler.postDelayed(mirrorReapplyRunnable, MIRROR_REAPPLY_INTERVAL_MS);
+        }
+        // Restaura overlay persistido.
+        EngineReverseStateHolder.INSTANCE.setOverlayEnabled(p.getBoolean(PREF_OVERLAY_ENABLED, false));
+        if (p.getBoolean(PREF_OVERLAY_ENABLED, false)) {
+            backgroundHandler.post(this::enableOverlayInternal);
         }
     }
 
@@ -1054,6 +1075,108 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         if (s == null || value == null || value.isEmpty()) return;
         s.lastOutsideTemp = value;
         if (sMirrorActive) s.applyMirrorWrite(value);
+        if (sOverlayActive) s.updateOverlayText(value);
+    }
+
+    // ── Overlay: desenha car.basic.outside_temp por cima da tela ──────────
+
+    private void enableOverlayInternal() {
+        try {
+            // Concede o SYSTEM_ALERT_WINDOW via appops (temos Shizuku/shell elevado) — sem tela manual.
+            runShell("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow", 6000);
+        } catch (Exception ignored) {}
+        mainHandler.post(this::addOverlayView);
+    }
+
+    private void addOverlayView() {
+        try {
+            if (mOverlayText != null) return; // já adicionado
+            SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            android.widget.TextView tv = new android.widget.TextView(this);
+            String v = lastOutsideTemp != null ? lastOutsideTemp
+                    : EngineReverseStateHolder.INSTANCE.getDiscoveredKeys().get(OUTSIDE_TEMP_SENSOR_KEY);
+            tv.setText(formatTemp(v));
+            tv.setTextColor(0xFFFFFFFF);
+            tv.setTextSize(18);
+            tv.setPadding(24, 10, 24, 10);
+            tv.setBackgroundColor(0xB0000000);
+
+            int type = android.os.Build.VERSION.SDK_INT >= 26
+                    ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : android.view.WindowManager.LayoutParams.TYPE_PHONE;
+            android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+            lp.x = p.getInt(PREF_OVERLAY_X, 40);
+            lp.y = p.getInt(PREF_OVERLAY_Y, 40);
+            mOverlayLp = lp;
+
+            // Arrastar para reposicionar; persiste x/y ao soltar.
+            tv.setOnTouchListener(new android.view.View.OnTouchListener() {
+                int startX, startY; float touchX, touchY;
+                @Override public boolean onTouch(android.view.View view, android.view.MotionEvent e) {
+                    switch (e.getAction()) {
+                        case android.view.MotionEvent.ACTION_DOWN:
+                            startX = mOverlayLp.x; startY = mOverlayLp.y;
+                            touchX = e.getRawX(); touchY = e.getRawY();
+                            return true;
+                        case android.view.MotionEvent.ACTION_MOVE:
+                            mOverlayLp.x = startX + (int) (e.getRawX() - touchX);
+                            mOverlayLp.y = startY + (int) (e.getRawY() - touchY);
+                            try { mWindowManager.updateViewLayout(mOverlayText, mOverlayLp); } catch (Exception ignored) {}
+                            return true;
+                        case android.view.MotionEvent.ACTION_UP:
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                    .putInt(PREF_OVERLAY_X, mOverlayLp.x)
+                                    .putInt(PREF_OVERLAY_Y, mOverlayLp.y).apply();
+                            return true;
+                    }
+                    return false;
+                }
+            });
+
+            mWindowManager.addView(tv, lp);
+            mOverlayText = tv;
+            sOverlayActive = true;
+            EngineReverseStateHolder.INSTANCE.setOverlayStatus("Overlay ativo — arraste para posicionar");
+            Log.w(TAG, "[overlay] adicionado");
+        } catch (Exception e) {
+            Log.e(TAG, "[overlay] falha ao adicionar: " + e.getMessage(), e);
+            EngineReverseStateHolder.INSTANCE.setOverlayStatus("Erro: " + e.getMessage());
+            sOverlayActive = false;
+            EngineReverseStateHolder.INSTANCE.setOverlayEnabled(false);
+        }
+    }
+
+    private void removeOverlayView() {
+        mainHandler.post(() -> {
+            try {
+                if (mOverlayText != null) mWindowManager.removeView(mOverlayText);
+            } catch (Exception ignored) {}
+            mOverlayText = null;
+            sOverlayActive = false;
+            EngineReverseStateHolder.INSTANCE.setOverlayStatus("Overlay desligado");
+        });
+    }
+
+    private void updateOverlayText(String value) {
+        final String txt = formatTemp(value);
+        mainHandler.post(() -> { if (mOverlayText != null) mOverlayText.setText(txt); });
+    }
+
+    private static String formatTemp(String raw) {
+        if (raw == null || raw.isEmpty()) return "--°";
+        try {
+            return Math.round(Float.parseFloat(raw)) + "°";
+        } catch (Exception e) {
+            return raw + "°";
+        }
     }
 
     /** Escreve o valor na chave-alvo via AIDL (mesmo caminho de cmd.common.request.set). */
@@ -1225,6 +1348,15 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             }
             if (ACTION_EXPORT_OEM_APKS.equals(action)) {
                 backgroundHandler.post(this::runExportOemApks);
+                return START_STICKY;
+            }
+            if (ACTION_SET_OVERLAY.equals(action)) {
+                boolean enabled = intent.getBooleanExtra(EXTRA_OVERLAY_ENABLED, false);
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                        .putBoolean(PREF_OVERLAY_ENABLED, enabled).apply();
+                EngineReverseStateHolder.INSTANCE.setOverlayEnabled(enabled);
+                if (enabled) backgroundHandler.post(this::enableOverlayInternal);
+                else removeOverlayView();
                 return START_STICKY;
             }
         }
@@ -1476,6 +1608,10 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         super.onDestroy();
         isServiceRunning = false;
         if (backgroundHandler != null) backgroundHandler.removeCallbacks(mirrorReapplyRunnable);
+        try {
+            if (mOverlayText != null && mWindowManager != null) mWindowManager.removeView(mOverlayText);
+        } catch (Exception ignored) {}
+        mOverlayText = null;
         if (sInstance == this) sInstance = null;
         if (handlerThread != null) handlerThread.quitSafely();
     }

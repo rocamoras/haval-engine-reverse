@@ -421,6 +421,12 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
             putExtra(UniversalMonitorService.EXTRA_MIRROR_TARGET_KEY, target)
         })
     }
+    fun setOverlay(enabled: Boolean) {
+        context.startService(Intent(context, UniversalMonitorService::class.java).apply {
+            action = UniversalMonitorService.ACTION_SET_OVERLAY
+            putExtra(UniversalMonitorService.EXTRA_OVERLAY_ENABLED, enabled)
+        })
+    }
 
     var apkUploadStatus by remember { mutableStateOf("") }
     // Sobe os APKs exportados um a um para o Firebase (logs/), acumulando os links.
@@ -483,6 +489,38 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
                     color = if (sensorValue != null) Color(0xFF81C784) else Color(0xFF546E7A),
                     fontSize = 26.sp, fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        // ── Card 1b: Overlay (temperatura real por cima da tela) ─────────
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            border = BorderStroke(1.dp, if (state.overlayEnabled) Color(0x5581C784) else Color(0x334FC3F7))
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Overlay: temperatura real na tela",
+                            color = Color(0xFF81C784), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Desenha o sensor real por cima da tela (arraste para posicionar). " +
+                            "Independe do OEM — funciona sempre.",
+                            color = Color(0xFF546E7A), fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = state.overlayEnabled,
+                        onCheckedChange = { setOverlay(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF81C784),
+                            checkedTrackColor = Color(0x5581C784)
+                        )
+                    )
+                }
+                if (state.overlayStatus.isNotBlank()) {
+                    Text(state.overlayStatus, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
             }
         }
 

@@ -177,6 +177,10 @@ object EngineReverseStateHolder {
     // Caminhos absolutos dos APKs copiados para o diretório privado do app (prontos p/ upload).
     val oemApkFiles = mutableStateListOf<String>()
 
+    // ── Overlay de temperatura ────────────────────────────────────────────
+    var overlayEnabled by mutableStateOf(false)
+    var overlayStatus  by mutableStateOf("")
+
     /**
      * Ponte para o serviço: chamado a cada novo valor do sensor de temperatura externa.
      * O serviço registra este hook (via campos estáticos) e faz a escrita AIDL na chave-alvo.
