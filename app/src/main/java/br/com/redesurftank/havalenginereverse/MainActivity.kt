@@ -371,6 +371,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 6,
+                onClick = { selectedTab = 6 },
+                text = {
+                    Text(
+                        "Clima",
+                        color = if (selectedTab == 6) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -381,6 +392,7 @@ fun DiscoveryScreen() {
             3 -> ActionsTab(state = state)
             4 -> NetworkTab(state = state)
             5 -> ScreenTempTab(state = state)
+            6 -> WeatherAidlTab()
         }
     }
 }
