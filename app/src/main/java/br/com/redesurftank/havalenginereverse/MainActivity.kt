@@ -428,6 +428,82 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
         })
     }
 
+    val scope = rememberCoroutineScope()
+    var fatDownloading by remember { mutableStateOf(false) }
+    var fatProgress    by remember { mutableFloatStateOf(0f) }
+    var fatMsg         by remember { mutableStateOf("") }
+    // Baixa do release o APK "fat" (com binários Frida) e abre o instalador.
+    fun downloadAndInstallFat() {
+        if (fatDownloading) return
+        scope.launch {
+            fatDownloading = true; fatProgress = 0f; fatMsg = "Buscando release…"
+            try {
+                val url = withContext(Dispatchers.IO) {
+                    val conn = URL(GITHUB_RELEASES_API).openConnection() as HttpURLConnection
+                    conn.connectTimeout = 8000; conn.readTimeout = 8000
+                    conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                    val json = conn.inputStream.bufferedReader().readText().also { conn.disconnect() }
+                    val assets = JSONObject(json).getJSONArray("assets")
+                    var found = ""
+                    // Prefere o apk de release (fat, com Frida); fallback: qualquer .apk.
+                    for (i in 0 until assets.length()) {
+                        val a = assets.getJSONObject(i)
+                        val n = a.getString("name").lowercase()
+                        if (n.endsWith(".apk") && (n.contains("release") || n.contains("fat") || n.contains("frida"))) {
+                            found = a.getString("browser_download_url"); break
+                        }
+                    }
+                    if (found.isEmpty()) {
+                        for (i in 0 until assets.length()) {
+                            val a = assets.getJSONObject(i)
+                            if (a.getString("name").lowercase().endsWith(".apk")) {
+                                found = a.getString("browser_download_url"); break
+                            }
+                        }
+                    }
+                    found
+                }
+                if (url.isEmpty()) { fatMsg = "APK fat não encontrado no release"; fatDownloading = false; return@launch }
+                fatMsg = "Baixando… (~86 MB)"
+                val apk = withContext(Dispatchers.IO) {
+                    val conn = URL(url).openConnection() as HttpURLConnection
+                    conn.connectTimeout = 10000; conn.readTimeout = 120000; conn.connect()
+                    val total = conn.contentLength.toLong()
+                    val file = File(context.cacheDir, "frida_fat.apk")
+                    BufferedInputStream(conn.inputStream).use { input ->
+                        FileOutputStream(file).use { output ->
+                            val buf = ByteArray(8192); var read = 0L; var n: Int
+                            while (input.read(buf).also { n = it } != -1) {
+                                output.write(buf, 0, n); read += n
+                                if (total > 0) withContext(Dispatchers.Main) { fatProgress = read.toFloat() / total }
+                            }
+                        }
+                    }
+                    conn.disconnect(); file
+                }
+                if (!context.packageManager.canRequestPackageInstalls()) {
+                    fatMsg = "Permita 'instalar apps desconhecidos' e toque de novo"
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    fatDownloading = false; return@launch
+                }
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", apk)
+                context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                fatMsg = "Instalador aberto"
+            } catch (e: Exception) {
+                fatMsg = "Erro: ${e.message}"
+            } finally {
+                fatDownloading = false
+            }
+        }
+    }
+
     var apkUploadStatus by remember { mutableStateOf("") }
     // Sobe os APKs exportados um a um para o Firebase (logs/), acumulando os links.
     fun uploadApksSequential(files: List<String>, index: Int, links: StringBuilder) {
@@ -535,9 +611,31 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
                 Text("Barra nativa via Frida (avançado)",
                     color = Color(0xFFFF8A65), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Text("Injeta um hook no SystemUI que destrava a temperatura real na barra nativa " +
-                    "(a trava de fábrica é BuildConfig.type=2). Requer o APK 'fat' com binários Frida. " +
-                    "Roda 'setenforce 0'; o SystemUI pode piscar ao injetar.",
+                    "(a trava de fábrica é BuildConfig.type=2). O botão abaixo baixa a versão com " +
+                    "binários Frida embutidos. Roda 'setenforce 0'; o SystemUI pode piscar ao injetar.",
                     color = Color(0xFF546E7A), fontSize = 10.sp)
+                // Baixar/instalar o APK fat (com binários Frida)
+                Button(
+                    onClick = { downloadAndInstallFat() },
+                    enabled = !fatDownloading,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2620)),
+                    border = BorderStroke(1.dp, Color(0x55FF8A65))
+                ) {
+                    if (fatDownloading) {
+                        CircularProgressIndicator(
+                            progress = { if (fatProgress > 0f) fatProgress else 0f },
+                            modifier = Modifier.size(16.dp), color = Color(0xFFFF8A65), strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Baixando ${(fatProgress * 100).toInt()}%", color = Color(0xFFFF8A65), fontSize = 12.sp)
+                    } else {
+                        Text("Baixar APK Frida (fat, ~86 MB) e instalar", color = Color(0xFFFF8A65), fontSize = 12.sp)
+                    }
+                }
+                if (fatMsg.isNotBlank()) {
+                    Text(fatMsg, color = Color(0xFF4FC3F7), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {

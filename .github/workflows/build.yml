@@ -31,6 +31,13 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
 
+      - name: Fetch Frida binaries (arm64) into res/raw
+        run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/v2.10.0"
+          curl -fL -o app/src/main/res/raw/fridaserver "$BASE/fridaserver"
+          curl -fL -o app/src/main/res/raw/fridainject "$BASE/fridainject"
+          ls -la app/src/main/res/raw/fridaserver app/src/main/res/raw/fridainject
+
       - name: Decode keystore
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
