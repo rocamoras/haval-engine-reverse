@@ -124,6 +124,28 @@ wx.connect()
 wx.disconnect()
 ```
 
+## Enviar temperatura pra central (impersonar o app de clima)
+
+Não existe API de push no `IWeatherController` (só `sync*`/`query*` que pedem fetch),
+nem broadcast com payload (`SHOW_WEATHER` só abre a gaveta). A única via de dados
+pra tela é o callback do serviço real. Então, pra **injetar** o nosso valor:
+
+**Hook Frida na launcher** (`com.beantechs.launcher`) — o alvo é
+`HiBoardView.parseWeather(CommonNowWeather)`, que pinta o card de clima da home
+(`temperature_tv`, `weather_tv`, ícone via `condCode`, `min/max`). Todos os getters
+do `CommonNowWeather` têm guarda de null, então dá pra fabricar o objeto com o
+construtor de 7 args (`basic=null`, `update=null`) sem NPE.
+
+Estratégia do script (`res/raw/com_beantechs_launcher_weather.js`):
+1. Lê `/data/local/tmp/inject_weather` (`tmp|condCode|condTxt|min|max`).
+2. Fabrica `CommonNowWeather` e chama `parseWeather` na main thread (push ativo, a cada 1,5s).
+3. Hooka `parseWeather` p/ sobrescrever qualquer callback real com o nosso valor ("grudento").
+
+Integração no app (aba **Clima**, agora um *emissor*):
+- `FridaUtils.injectLauncherWeather()` — sobe o fridaserver e injeta na launcher (Shizuku; requer APK fat).
+- `FridaUtils.writeWeather(tmp, code, txt, min, max)` — escreve o valor (atualiza sem reinjetar).
+- `FridaUtils.stopLauncherWeather()` — para e limpa.
+
 ## Pendências / próximos passos
 
 - [ ] Testar o bind no carro (confirmar que o serviço entrega callback sem exigir mais setup).
