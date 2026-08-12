@@ -173,6 +173,9 @@ object EngineReverseStateHolder {
     // ── Exportação de APKs OEM ────────────────────────────────────────────
     var oemApkExportRunning by mutableStateOf(false)
     var oemApkExportResult  by mutableStateOf("")
+    var oemApkUploading     by mutableStateOf(false)
+    // Caminhos absolutos dos APKs copiados para o diretório privado do app (prontos p/ upload).
+    val oemApkFiles = mutableStateListOf<String>()
 
     /**
      * Ponte para o serviço: chamado a cada novo valor do sensor de temperatura externa.

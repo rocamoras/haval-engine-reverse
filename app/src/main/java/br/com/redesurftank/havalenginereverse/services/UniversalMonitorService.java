@@ -1525,7 +1525,12 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         if (EngineReverseStateHolder.INSTANCE.getOemApkExportRunning()) return;
         EngineReverseStateHolder.INSTANCE.setOemApkExportRunning(true);
         EngineReverseStateHolder.INSTANCE.setOemApkExportResult("Procurando pacotes OEM…");
-        String destDir = "/sdcard/Download/haval-oem-apks";
+        EngineReverseStateHolder.INSTANCE.getOemApkFiles().clear();
+        // Diretório privado do app (external) — legível pelo app sem READ_EXTERNAL_STORAGE.
+        java.io.File outRoot = getExternalFilesDir("oem-apks");
+        if (outRoot == null) outRoot = new java.io.File(getFilesDir(), "oem-apks");
+        outRoot.mkdirs();
+        String destDir = outRoot.getAbsolutePath();
         StringBuilder report = new StringBuilder();
         try {
             // Alvos explícitos + descoberta por palavra-chave (nome do pacote).
@@ -1558,18 +1563,19 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                     String outName = pkg + (i == 0 ? ".apk" : "_split" + i + ".apk");
                     String dst = destDir + "/" + outName;
                     runShell("cp -f '" + src + "' '" + dst + "' && chmod 644 '" + dst + "'", 20000);
-                    String ls = runShell("ls -la '" + dst + "' 2>/dev/null", 6000).trim();
-                    if (!ls.isEmpty()) {
+                    java.io.File out = new java.io.File(dst);
+                    if (out.exists() && out.length() > 0) {
                         ok++;
-                        report.append("✓ ").append(outName).append('\n')
-                              .append("   ").append(ls).append('\n');
+                        EngineReverseStateHolder.INSTANCE.getOemApkFiles().add(dst);
+                        report.append("✓ ").append(outName)
+                              .append(" (").append(out.length() / 1024).append(" KB)\n");
                     } else {
                         report.append("✗ falhou: ").append(pkg).append(" (").append(src).append(")\n");
                     }
                 }
             }
-            String header = ok + " APK(s) copiado(s) para:\n" + destDir + "\n\n" +
-                    "Puxe com:\n  adb pull " + destDir + "\n\n";
+            String header = ok + " APK(s) prontos. Toque em \"Enviar APKs\" para subir ao Firebase " +
+                    "(ou puxe com: adb pull " + destDir + ").\n\n";
             EngineReverseStateHolder.INSTANCE.setOemApkExportResult(header + report);
             Log.w(TAG, "[export-apks] " + ok + " apks → " + destDir);
         } catch (Exception e) {

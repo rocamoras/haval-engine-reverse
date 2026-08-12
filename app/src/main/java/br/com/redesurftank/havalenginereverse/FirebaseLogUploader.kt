@@ -63,6 +63,48 @@ object FirebaseLogUploader {
         )
     }
 
+    /**
+     * Faz upload de um arquivo (ex.: APK) por streaming — evita carregar tudo em memória.
+     * DEVE ser chamado na main thread (Firebase usa Looper internamente).
+     */
+    fun uploadFile(
+        file: File,
+        destName: String,
+        onProgress: (String) -> Unit,
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        onProgress("Autenticando...")
+        ensureSignedIn(
+            onReady = {
+                val ref = storage.reference.child("logs/$destName")
+                onProgress("Enviando $destName (${file.length() / 1024} KB)...")
+                val stream = try {
+                    file.inputStream()
+                } catch (e: Exception) {
+                    onError("Erro ao abrir ${file.name}: ${e.message}"); return@ensureSignedIn
+                }
+                ref.putStream(stream)
+                    .addOnProgressListener { snap ->
+                        val pct = if (snap.totalByteCount > 0)
+                            (100 * snap.bytesTransferred / snap.totalByteCount) else 0
+                        onProgress("Enviando $destName… $pct%")
+                    }
+                    .addOnSuccessListener {
+                        try { stream.close() } catch (_: Exception) {}
+                        ref.downloadUrl
+                            .addOnSuccessListener { uri -> onSuccess(uri.toString()) }
+                            .addOnFailureListener { onSuccess(destName) }
+                    }
+                    .addOnFailureListener {
+                        try { stream.close() } catch (_: Exception) {}
+                        onError(it.message ?: "falha no upload")
+                    }
+            },
+            onError = { onError("Erro de autenticação: $it") }
+        )
+    }
+
     fun uploadJson(
         json: String,
         onProgress: (String) -> Unit,

@@ -422,6 +422,32 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
         })
     }
 
+    var apkUploadStatus by remember { mutableStateOf("") }
+    // Sobe os APKs exportados um a um para o Firebase (logs/), acumulando os links.
+    fun uploadApksSequential(files: List<String>, index: Int, links: StringBuilder) {
+        if (index >= files.size) {
+            state.oemApkUploading = false
+            apkUploadStatus = "✓ ${files.size} APK(s) enviados:\n$links"
+            return
+        }
+        val f = java.io.File(files[index])
+        val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        FirebaseLogUploader.uploadFile(
+            file = f,
+            destName = "oem_${ts}_${f.name}",
+            onProgress = { apkUploadStatus = "(${index + 1}/${files.size}) $it" },
+            onSuccess = { url ->
+                links.append("• ").append(url).append('\n')
+                uploadApksSequential(files, index + 1, links)
+            },
+            onError = {
+                state.oemApkUploading = false
+                apkUploadStatus = "Erro em ${f.name}: $it"
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -626,6 +652,30 @@ private fun ScreenTempTab(state: EngineReverseStateHolder) {
                 }
                 if (state.oemApkExportResult.isNotBlank()) {
                     Text(state.oemApkExportResult, color = Color(0xFFB0BEC5), fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace)
+                }
+                if (state.oemApkFiles.isNotEmpty()) {
+                    Button(
+                        onClick = {
+                            state.oemApkUploading = true
+                            apkUploadStatus = "Iniciando upload…"
+                            uploadApksSequential(state.oemApkFiles.toList(), 0, StringBuilder())
+                        },
+                        enabled = !state.oemApkUploading && !state.oemApkExportRunning,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF243B2A)),
+                        border = BorderStroke(1.dp, Color(0x5581C784))
+                    ) {
+                        if (state.oemApkUploading) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Color(0xFF81C784), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("Enviar APKs ao Firebase (${state.oemApkFiles.size})",
+                            color = Color(0xFF81C784), fontSize = 12.sp)
+                    }
+                }
+                if (apkUploadStatus.isNotBlank()) {
+                    Text(apkUploadStatus, color = Color(0xFF4FC3F7), fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace)
                 }
             }
