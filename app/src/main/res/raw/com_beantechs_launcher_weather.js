@@ -83,16 +83,24 @@ Java.perform(function () {
     }
 
     // (2) push ativo: mesmo sem callback real, força o nosso valor no card.
+    var tick = 0, lastState = "";
     function pushNow() {
-        if (desired === null) return;
+        tick++;
+        if (desired === null) { logState("sem valor (inject_weather vazio)"); return; }
         var view = null;
-        try { view = HM.INSTANCE.value.getInstance().getMHiBoardView(); } catch (e) { return; }
-        if (view === null) return; // gaveta ainda não criada
+        try { view = HM.INSTANCE.value.getInstance().getMHiBoardView(); } catch (e) { logState("getMHiBoardView err: " + e); return; }
+        if (view === null) { logState("hiBoardView null — abra a tela menos-um p/ ver"); return; }
         var w;
         try { w = build(desired); } catch (e) { log("build err: " + e); return; }
         Java.scheduleOnMainThread(function () {
             try { view.parseWeather(w); } catch (e) { log("push err: " + e); }
         });
+        logState("pintado " + desired.tmp + "° (" + desired.txt + ")");
+    }
+
+    // Loga só quando o estado muda, ou a cada ~30s, p/ não floodar.
+    function logState(s) {
+        if (s !== lastState || tick % 20 === 0) { lastState = s; log(s); }
     }
 
     setInterval(function () {

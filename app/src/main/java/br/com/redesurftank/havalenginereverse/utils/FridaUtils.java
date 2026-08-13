@@ -113,12 +113,15 @@ public class FridaUtils {
                 Thread.sleep(1500);
             }
 
-            String pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"sh", "-c",
-                    "ps -A | grep ' " + LAUNCHER_PROCESS + "' | awk '{print $2}'"}).trim();
-            if (pid.contains("\n")) pid = pid.split("\n")[0].trim();
-            if (pid.isEmpty())
-                pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", LAUNCHER_PROCESS}).trim();
-            if (pid.contains(" ")) pid = pid.split(" ")[0].trim();
+            String pid = launcherPid();
+            if (pid.isEmpty()) {
+                // A launcher (home) é morta pelo sistema quando nosso app fica em
+                // foreground. Acorda ela antes de injetar.
+                svc.newProcess(new String[]{"am", "start", "-a", "android.intent.action.MAIN",
+                        "-c", "android.intent.category.HOME"}, null, null).waitFor();
+                Thread.sleep(2000);
+                pid = launcherPid();
+            }
             if (pid.isEmpty()) return "Launcher não encontrada (pid vazio)";
 
             // Idempotente: remove injeções anteriores na launcher antes de subir uma nova.
@@ -134,6 +137,14 @@ public class FridaUtils {
             Log.e(TAG, "[frida] erro: " + e.getMessage(), e);
             return "Erro: " + e.getMessage();
         }
+    }
+
+    /** pid da launcher (home). Vazio se não estiver rodando. */
+    private static String launcherPid() {
+        String pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", LAUNCHER_PROCESS}).trim();
+        if (pid.contains("\n")) pid = pid.split("\n")[0].trim();
+        if (pid.contains(" ")) pid = pid.split(" ")[0].trim();
+        return pid;
     }
 
     /** Escreve o valor a exibir no card de clima. Formato: tmp|condCode|condTxt|min|max. */
