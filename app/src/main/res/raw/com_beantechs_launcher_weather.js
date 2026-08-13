@@ -24,11 +24,12 @@ Java.perform(function () {
     var FileReader = Java.use("java.io.FileReader");
     var BufReader  = Java.use("java.io.BufferedReader");
     var W  = Java.use("com.beantechs.weatherservice.entity.CommonNowWeather");
-    var HM = Java.use("com.beantechs.launcher.hiboard.HiBoardManager");
     var HiBoardView = Java.use("com.beantechs.launcher.hiboard.HiBoardView");
 
     // Estado desejado: {tmp, code, txt, min, max}. null = sem injeção.
     var desired = null;
+    // Referência viva da HiBoardView (capturada no hook ou via Java.choose).
+    var cachedView = null;
 
     function readCtrl() {
         try {
@@ -66,6 +67,7 @@ Java.perform(function () {
     // (3) sticky: sobrescreve o callback real com o nosso valor.
     try {
         HiBoardView.parseWeather.implementation = function (now) {
+            cachedView = this; // captura a view viva
             if (desired !== null && now !== null) {
                 try {
                     now.tmp.value      = desired.tmp;
@@ -82,18 +84,32 @@ Java.perform(function () {
         log("falha ao hookar parseWeather: " + e);
     }
 
+    // Acha a HiBoardView viva no heap (fallback quando o hook ainda não capturou).
+    function findView() {
+        if (cachedView !== null) return cachedView;
+        var found = null;
+        try {
+            Java.choose("com.beantechs.launcher.hiboard.HiBoardView", {
+                onMatch: function (inst) { found = inst; return "stop"; },
+                onComplete: function () {}
+            });
+        } catch (e) { log("choose err: " + e); }
+        if (found !== null) cachedView = found;
+        return found;
+    }
+
     // (2) push ativo: mesmo sem callback real, força o nosso valor no card.
     var tick = 0, lastState = "";
     function pushNow() {
         tick++;
         if (desired === null) { logState("sem valor (inject_weather vazio)"); return; }
-        var view = null;
-        try { view = HM.INSTANCE.value.getInstance().getMHiBoardView(); } catch (e) { logState("getMHiBoardView err: " + e); return; }
-        if (view === null) { logState("hiBoardView null — abra a tela menos-um p/ ver"); return; }
+        var view = findView();
+        if (view === null) { logState("hiBoardView não existe — abra a tela menos-um p/ criar o card"); return; }
         var w;
         try { w = build(desired); } catch (e) { log("build err: " + e); return; }
         Java.scheduleOnMainThread(function () {
-            try { view.parseWeather(w); } catch (e) { log("push err: " + e); }
+            try { view.parseWeather(w); }
+            catch (e) { log("push err (view stale?): " + e); cachedView = null; }
         });
         logState("pintado " + desired.tmp + "° (" + desired.txt + ")");
     }
@@ -104,8 +120,11 @@ Java.perform(function () {
     }
 
     setInterval(function () {
-        desired = readCtrl();
-        pushNow();
+        // Java.choose/scheduleOnMainThread exigem contexto VM-attached.
+        Java.perform(function () {
+            desired = readCtrl();
+            pushNow();
+        });
     }, 1500);
 
     log("injetor de clima ativo (alvo com.beantechs.launcher)");
