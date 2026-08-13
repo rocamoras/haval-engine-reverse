@@ -74,6 +74,9 @@ public class FridaUtils {
             if (pid.contains(" ")) pid = pid.split(" ")[0].trim();
             if (pid.isEmpty()) return "SystemUI não encontrado (pid vazio)";
 
+            // Idempotente: remove injeções anteriores no SystemUI antes de subir uma nova.
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "com_android_systemui"});
+
             String logFile = "/data/local/tmp/com_android_systemui.log";
             String cmd = "setsid " + FRIDA_INJECTOR_PATH + " -D local -p " + pid + " -s " + SCRIPT_PATH
                     + " > " + logFile + " 2>&1 < /dev/null &";
