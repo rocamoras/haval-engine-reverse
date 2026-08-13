@@ -31,11 +31,18 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
 
-      - name: Fetch Frida binaries (arm64) into res/raw
+      - name: Fetch Frida 16.x binaries (arm64) into res/raw
         run: |
-          BASE="https://github.com/${{ github.repository }}/releases/download/v2.10.0"
-          curl -fL -o app/src/main/res/raw/fridaserver "$BASE/fridaserver"
-          curl -fL -o app/src/main/res/raw/fridainject "$BASE/fridainject"
+          # Frida 17 removeu o bridge global `Java` (virou módulo externo). Usamos
+          # 16.7.19, onde Java.perform/Java.use funcionam em scripts injetados crus.
+          FV=16.7.19
+          BASE="https://github.com/frida/frida/releases/download/${FV}"
+          curl -fL -o fs.xz "${BASE}/frida-server-${FV}-android-arm64.xz"
+          curl -fL -o fi.xz "${BASE}/frida-inject-${FV}-android-arm64.xz"
+          xz -d fs.xz && xz -d fi.xz
+          mv fs app/src/main/res/raw/fridaserver
+          mv fi app/src/main/res/raw/fridainject
+          chmod 644 app/src/main/res/raw/fridaserver app/src/main/res/raw/fridainject
           ls -la app/src/main/res/raw/fridaserver app/src/main/res/raw/fridainject
 
       - name: Decode keystore

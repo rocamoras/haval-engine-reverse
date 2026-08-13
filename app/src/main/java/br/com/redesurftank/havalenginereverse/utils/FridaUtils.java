@@ -121,6 +121,9 @@ public class FridaUtils {
             if (pid.contains(" ")) pid = pid.split(" ")[0].trim();
             if (pid.isEmpty()) return "Launcher não encontrada (pid vazio)";
 
+            // Idempotente: remove injeções anteriores na launcher antes de subir uma nova.
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "com_beantechs_launcher_weather"});
+
             String logFile = "/data/local/tmp/com_beantechs_launcher_weather.log";
             String cmd = "setsid " + FRIDA_INJECTOR_PATH + " -D local -p " + pid + " -s " + LAUNCHER_SCRIPT_PATH
                     + " > " + logFile + " 2>&1 < /dev/null &";

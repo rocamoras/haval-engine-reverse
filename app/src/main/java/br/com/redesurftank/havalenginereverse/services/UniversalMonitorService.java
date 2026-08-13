@@ -1054,19 +1054,25 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         mainHandler = new Handler(Looper.getMainLooper());
         mWindowManager = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
 
-        // Restaura config de espelhamento persistida (sobrevive a reboot/OTA via BootReceiver).
-        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        sMirrorActive = p.getBoolean(PREF_MIRROR_ENABLED, false);
-        sMirrorTargetKey = p.getString(PREF_MIRROR_TARGET, DEFAULT_MIRROR_TARGET_KEY);
-        EngineReverseStateHolder.INSTANCE.persistMirrorConfig(sMirrorActive, sMirrorTargetKey);
-        if (sMirrorActive) {
-            EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Espelhamento ligado — aguardando sensor…");
-            backgroundHandler.postDelayed(mirrorReapplyRunnable, MIRROR_REAPPLY_INTERVAL_MS);
-        }
-        // Restaura overlay persistido.
-        EngineReverseStateHolder.INSTANCE.setOverlayEnabled(p.getBoolean(PREF_OVERLAY_ENABLED, false));
-        if (p.getBoolean(PREF_OVERLAY_ENABLED, false)) {
-            backgroundHandler.post(this::enableOverlayInternal);
+        // Restaura config persistida (sobrevive a reboot/OTA via BootReceiver).
+        // No boot direto (antes do desbloqueio), o storage credential-encrypted não
+        // está disponível e getSharedPreferences lança — o try/catch evita derrubar
+        // o processo (tela preta). A restauração é best-effort; reaplica ao interagir.
+        try {
+            SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            sMirrorActive = p.getBoolean(PREF_MIRROR_ENABLED, false);
+            sMirrorTargetKey = p.getString(PREF_MIRROR_TARGET, DEFAULT_MIRROR_TARGET_KEY);
+            EngineReverseStateHolder.INSTANCE.persistMirrorConfig(sMirrorActive, sMirrorTargetKey);
+            if (sMirrorActive) {
+                EngineReverseStateHolder.INSTANCE.setMirrorTempStatus("Espelhamento ligado — aguardando sensor…");
+                backgroundHandler.postDelayed(mirrorReapplyRunnable, MIRROR_REAPPLY_INTERVAL_MS);
+            }
+            EngineReverseStateHolder.INSTANCE.setOverlayEnabled(p.getBoolean(PREF_OVERLAY_ENABLED, false));
+            if (p.getBoolean(PREF_OVERLAY_ENABLED, false)) {
+                backgroundHandler.post(this::enableOverlayInternal);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "onCreate: prefs indisponíveis (boot bloqueado?), restauração adiada: " + e.getMessage());
         }
     }
 
