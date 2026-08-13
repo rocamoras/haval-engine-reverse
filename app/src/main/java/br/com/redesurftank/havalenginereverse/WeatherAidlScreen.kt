@@ -1,5 +1,8 @@
 package br.com.redesurftank.havalenginereverse
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -48,6 +51,9 @@ fun WeatherAidlTab() {
     var hooked  by remember { mutableStateOf(false) }
     var busy    by remember { mutableStateOf(false) }
     val log     = remember { mutableStateListOf<String>() }
+
+    var fbBusy  by remember { mutableStateOf(false) }
+    var fbMsg   by remember { mutableStateOf("") }
 
     fun stamp() = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
     fun addLog(s: String) {
@@ -143,6 +149,43 @@ fun WeatherAidlTab() {
             else log.forEach {
                 Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
+        }
+
+        // ── Card: enviar log/diagnóstico pro Firebase ────────────────────
+        WxCard {
+            Text("Diagnóstico → Firebase", color = Color(0xFF80CBC4), fontSize = 12.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                "Coleta os logs do Frida (barra/systemui + launcher), pids, versão e logcat " +
+                    "e envia pro Firebase. A URL é copiada pra você me mandar.",
+                color = Color(0xFF90A4AE), fontSize = 10.sp
+            )
+            WxButton(if (fbBusy) "enviando…" else "enviar log pro Firebase",
+                enabled = !fbBusy, Color(0xFF00695C)) {
+                if (!fbBusy) {
+                    fbBusy = true; fbMsg = "coletando (Shizuku root)…"
+                    scope.launch {
+                        val diag = withContext(Dispatchers.IO) { FridaUtils.collectDiagnostics() }
+                        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        val f = java.io.File(context.cacheDir, "frida_diag_$ts.txt")
+                        withContext(Dispatchers.IO) { f.writeText(diag) }
+                        fbMsg = "enviando ${f.length() / 1024} KB…"
+                        FirebaseLogUploader.uploadFile(
+                            file = f, destName = "frida_diag_$ts.txt",
+                            onProgress = { fbMsg = it },
+                            onSuccess = { url ->
+                                fbMsg = "✓ $url"
+                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cb.setPrimaryClip(ClipData.newPlainText("firebase-log", url))
+                                fbBusy = false
+                            },
+                            onError = { fbMsg = "erro: $it"; fbBusy = false }
+                        )
+                    }
+                }
+            }
+            if (fbMsg.isNotBlank()) Text(fbMsg, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace)
         }
 
         // ── Card: instalar/atualizar pela central (telnet root) ──────────

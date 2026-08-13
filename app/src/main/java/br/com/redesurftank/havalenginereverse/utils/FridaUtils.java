@@ -139,6 +139,44 @@ public class FridaUtils {
         }
     }
 
+    /** Executa um comando como root via Shizuku e retorna a saída (ou marcador de erro). */
+    private static String sh(String cmd) {
+        try {
+            return ShizukuUtils.runCommandAndGetOutput(new String[]{"sh", "-c", cmd});
+        } catch (Exception e) {
+            return "(err: " + e.getMessage() + ")";
+        }
+    }
+
+    /**
+     * Coleta um relatório de diagnóstico (logs do Frida, pids, versão, logcat).
+     * Os logs em /data/local/tmp são root:600 — lê via Shizuku (root). Blocante.
+     */
+    public static String collectDiagnostics() {
+        if (!Shizuku.pingBinder()) return "Shizuku indisponível — não consegui ler os logs.";
+        StringBuilder sb = new StringBuilder();
+        sb.append("==== FRIDA DIAG ====\n");
+        sb.append("app versionName: ").append(appVersion()).append('\n');
+        sb.append("\n== frida version ==\n").append(sh(FRIDA_INJECTOR_PATH + " --version 2>&1"));
+        sb.append("\n== processos frida ==\n").append(sh("ps -A -o PID,NAME 2>/dev/null | grep -i frida | grep -v grep"));
+        sb.append("\n== pids alvo ==\n")
+          .append("systemui=").append(sh("pidof com.android.systemui")).append('\n')
+          .append("launcher=").append(sh("pidof com.beantechs.launcher")).append('\n');
+        sb.append("\n== inject_weather ==\n").append(sh("cat " + WEATHER_CTRL_PATH + " 2>&1"));
+        sb.append("\n== LOG systemui (barra) ==\n").append(sh("cat /data/local/tmp/com_android_systemui.log 2>&1"));
+        sb.append("\n== LOG launcher (hiboard) ==\n").append(sh("cat " + "/data/local/tmp/com_beantechs_launcher_weather.log" + " 2>&1"));
+        sb.append("\n== logcat (frida/temp/weather, 300) ==\n")
+          .append(sh("logcat -d -t 300 2>/dev/null | grep -iE 'frida|outsideTemp|outside_temp|launcher-wx|sysui-outtemp|FridaUtils|BeanCarStatusBar' | tail -120"));
+        return sb.toString();
+    }
+
+    private static String appVersion() {
+        try {
+            android.content.Context c = App.getContext();
+            return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+        } catch (Exception e) { return "?"; }
+    }
+
     /** pid da launcher (home). Vazio se não estiver rodando. */
     private static String launcherPid() {
         String pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", LAUNCHER_PROCESS}).trim();
