@@ -300,10 +300,11 @@ fun DiscoveryScreen() {
         }
 
         // ── Tabs ──────────────────────────────────────────────────────────
-        TabRow(
+        ScrollableTabRow(
             selectedTabIndex = selectedTab,
             containerColor = Color(0xFF1A1A2E),
-            contentColor = Color(0xFF4FC3F7)
+            contentColor = Color(0xFF4FC3F7),
+            edgePadding = 0.dp
         ) {
             Tab(
                 selected = selectedTab == 0,
@@ -382,6 +383,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 7,
+                onClick = { selectedTab = 7 },
+                text = {
+                    Text(
+                        "APKs",
+                        color = if (selectedTab == 7) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -393,6 +405,7 @@ fun DiscoveryScreen() {
             4 -> NetworkTab(state = state)
             5 -> ScreenTempTab(state = state)
             6 -> WeatherAidlTab()
+            7 -> ApkPickerTab()
         }
     }
 }
