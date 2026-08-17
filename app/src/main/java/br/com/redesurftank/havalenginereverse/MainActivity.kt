@@ -394,6 +394,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 8,
+                onClick = { selectedTab = 8 },
+                text = {
+                    Text(
+                        "Mídia",
+                        color = if (selectedTab == 8) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -406,6 +417,7 @@ fun DiscoveryScreen() {
             5 -> ScreenTempTab(state = state)
             6 -> WeatherAidlTab()
             7 -> ApkPickerTab()
+            8 -> MediaCardTab()
         }
     }
 }

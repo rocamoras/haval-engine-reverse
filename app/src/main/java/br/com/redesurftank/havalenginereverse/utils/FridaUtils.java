@@ -31,6 +31,14 @@ public class FridaUtils {
     public static final String LAUNCHER_SCRIPT_PATH = "/data/local/tmp/com_beantechs_launcher_weather.js";
     public static final String WEATHER_CTRL_PATH    = "/data/local/tmp/inject_weather";
     private static final String LAUNCHER_PROCESS    = "com.beantechs.launcher";
+
+    // ── Card de mídia online da MediaCenter (quais CPs aparecem) ──────────────
+    public static final String MEDIA_CP_SCRIPT_PATH = "/data/local/tmp/com_beantechs_mediacenter_cp.js";
+    public static final String MEDIA_CP_CTRL_PATH   = "/data/local/tmp/inject_media_cp";
+    private static final String MEDIACENTER_PROCESS = "com.beantechs.mediacenter";
+    private static final String MEDIACENTER_ACTIVITY =
+            "com.beantechs.mediacenter/com.beantechs.mediacenter.mainmodel1xos.ui.MediaCenterActivity";
+
     /** Abaixo disso o arquivo em res/raw é um placeholder, não o binário real. */
     private static final long MIN_REAL_BINARY_BYTES = 100_000L;
 
@@ -142,6 +150,118 @@ public class FridaUtils {
         }
     }
 
+    /**
+     * Injeta o hook do card de mídia online na MediaCenter (com.beantechs.mediacenter).
+     * A lista de ícones em si vem do arquivo de controle escrito por
+     * {@link #writeMediaCp} — muda sem reinjetar.
+     */
+    public static String injectMediaCenterCp() {
+        if (!Shizuku.pingBinder()) return "Shizuku indisponível";
+        if (!fridaToolsEmbedded())
+            return "Binários do Frida ausentes neste APK (placeholder). Use o APK 'fat/test'.";
+        try {
+            if (!extract(R.raw.fridaserver, FRIDA_SERVER_PATH)) return "Falha ao extrair fridaserver";
+            if (!extract(R.raw.fridainject, FRIDA_INJECTOR_PATH)) return "Falha ao extrair fridainjector";
+            if (!extract(R.raw.com_beantechs_mediacenter_cp, MEDIA_CP_SCRIPT_PATH))
+                return "Falha ao extrair script";
+
+            IShizukuService svc = IShizukuService.Stub.asInterface(Shizuku.getBinder());
+            svc.newProcess(new String[]{"setenforce", "0"}, null, null).waitFor();
+            svc.newProcess(new String[]{"chmod", "755", FRIDA_SERVER_PATH}, null, null).waitFor();
+            svc.newProcess(new String[]{"chmod", "755", FRIDA_INJECTOR_PATH}, null, null).waitFor();
+
+            String running = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", "fridaserver"}).trim();
+            if (running.isEmpty()) {
+                svc.newProcess(new String[]{"/bin/sh", "-c",
+                        "setsid " + FRIDA_SERVER_PATH + " >/dev/null 2>&1 < /dev/null &"}, null, null).waitFor();
+                Thread.sleep(1500);
+            }
+
+            String pid = firstPid(MEDIACENTER_PROCESS);
+            if (pid.isEmpty()) {
+                // O app de mídia pode estar parado: abre a tela pra criar o processo.
+                svc.newProcess(new String[]{"am", "start", "-n", MEDIACENTER_ACTIVITY}, null, null).waitFor();
+                Thread.sleep(2500);
+                pid = firstPid(MEDIACENTER_PROCESS);
+            }
+            if (pid.isEmpty()) return "MediaCenter não encontrada (pid vazio)";
+
+            // Idempotente: remove injeções anteriores antes de subir uma nova.
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "com_beantechs_mediacenter_cp"});
+
+            String logFile = "/data/local/tmp/com_beantechs_mediacenter_cp.log";
+            String cmd = "setsid " + FRIDA_INJECTOR_PATH + " -D local -p " + pid + " -s " + MEDIA_CP_SCRIPT_PATH
+                    + " > " + logFile + " 2>&1 < /dev/null &";
+            svc.newProcess(new String[]{"/bin/sh", "-c", cmd}, null, null).waitFor();
+            Log.w(TAG, "[frida] injetado na mediacenter pid=" + pid);
+            return "Hook do card ativo na MediaCenter (pid " + pid + ")";
+        } catch (Exception e) {
+            Log.e(TAG, "[frida] erro: " + e.getMessage(), e);
+            return "Erro: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Escreve a lista de CPs que deve aparecer no card. CSV de ids 501..600
+     * (ex. "553" = só TuneIn). Vazio/"none" = nenhum ícone.
+     */
+    public static String writeMediaCp(String csv) {
+        try {
+            String content = (csv == null || csv.trim().isEmpty()) ? "none" : csv.trim();
+            File f = new File(App.getContext().getCacheDir(), "inject_media_cp");
+            try (FileOutputStream o = new FileOutputStream(f)) { o.write(content.getBytes("UTF-8")); }
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"cp", "-f", f.getAbsolutePath(), MEDIA_CP_CTRL_PATH});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"chmod", "644", MEDIA_CP_CTRL_PATH});
+            return "none".equals(content)
+                    ? "Aplicado: nenhum ícone no card"
+                    : "Aplicado: [" + content + "]";
+        } catch (Exception e) {
+            Log.e(TAG, "[frida] writeMediaCp erro: " + e.getMessage(), e);
+            return "Erro ao aplicar: " + e.getMessage();
+        }
+    }
+
+    /** Traz a tela de mídia pra frente (o hook repinta o card sozinho em ~1,5s). */
+    public static String openMediaCenter() {
+        try {
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "start", "-n", MEDIACENTER_ACTIVITY});
+            return "MediaCenter aberta";
+        } catch (Exception e) {
+            return "Erro ao abrir: " + e.getMessage();
+        }
+    }
+
+    /** Remove o arquivo de controle e a injeção — volta ao comportamento de fábrica. */
+    public static String stopMediaCenterCp() {
+        try {
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"rm", "-f", MEDIA_CP_CTRL_PATH});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "com_beantechs_mediacenter_cp"});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", MEDIACENTER_PROCESS});
+            return "Hook removido e MediaCenter reiniciada (card volta ao padrão)";
+        } catch (Exception e) {
+            return "Erro ao parar: " + e.getMessage();
+        }
+    }
+
+    /** Conteúdo atual do arquivo de controle (vazio = sem override). */
+    public static String readMediaCp() {
+        String out = sh("cat " + MEDIA_CP_CTRL_PATH + " 2>/dev/null").trim();
+        return out;
+    }
+
+    /** Log da injeção na MediaCenter (root:600 — lê via Shizuku). */
+    public static String mediaCpLog() {
+        return sh("tail -40 /data/local/tmp/com_beantechs_mediacenter_cp.log 2>&1");
+    }
+
+    /** Primeiro pid de um processo (pidof pode devolver vários). */
+    private static String firstPid(String process) {
+        String pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", process}).trim();
+        if (pid.contains("\n")) pid = pid.split("\n")[0].trim();
+        if (pid.contains(" ")) pid = pid.split(" ")[0].trim();
+        return pid;
+    }
+
     /** Executa um comando como root via Shizuku e retorna a saída (ou marcador de erro). */
     private static String sh(String cmd) {
         try {
@@ -164,8 +284,16 @@ public class FridaUtils {
         sb.append("\n== processos frida ==\n").append(sh("ps -A -o PID,NAME 2>/dev/null | grep -i frida | grep -v grep"));
         sb.append("\n== pids alvo ==\n")
           .append("systemui=").append(sh("pidof com.android.systemui")).append('\n')
-          .append("launcher=").append(sh("pidof com.beantechs.launcher")).append('\n');
+          .append("launcher=").append(sh("pidof com.beantechs.launcher")).append('\n')
+          .append("mediacenter=").append(sh("pidof " + MEDIACENTER_PROCESS)).append('\n');
         sb.append("\n== inject_weather ==\n").append(sh("cat " + WEATHER_CTRL_PATH + " 2>&1"));
+        sb.append("\n== inject_media_cp ==\n").append(sh("cat " + MEDIA_CP_CTRL_PATH + " 2>&1"));
+        sb.append("\n== country code ==\n")
+          .append("persist.bean.country.code=").append(sh("getprop persist.bean.country.code")).append('\n')
+          .append("gwm.special.country.export=")
+          .append(sh("getprop persist.vendor.gwm.cfg.special.country.export")).append('\n');
+        sb.append("\n== LOG mediacenter (card) ==\n")
+          .append(sh("cat /data/local/tmp/com_beantechs_mediacenter_cp.log 2>&1"));
         sb.append("\n== LOG systemui (barra) ==\n").append(sh("cat /data/local/tmp/com_android_systemui.log 2>&1"));
         sb.append("\n== LOG launcher (hiboard) ==\n").append(sh("cat " + "/data/local/tmp/com_beantechs_launcher_weather.log" + " 2>&1"));
         sb.append("\n== logcat (frida/temp/weather, 300) ==\n")
