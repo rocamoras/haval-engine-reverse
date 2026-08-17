@@ -243,6 +243,39 @@ public class FridaUtils {
         }
     }
 
+    /**
+     * Mata a MediaCenter, reabre a tela e injeta em seguida. Usar quando o hook
+     * "não pegou": garante que o injetor entra num processo novo com as classes
+     * já carregadas, em vez de disputar com uma Activity criada antes dele.
+     */
+    public static String restartMediaCenterAndInject() {
+        if (!Shizuku.pingBinder()) return "Shizuku indisponível";
+        try {
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "com_beantechs_mediacenter_cp"});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", MEDIACENTER_PROCESS});
+            Thread.sleep(800);
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "start", "-n", MEDIACENTER_ACTIVITY});
+            Thread.sleep(3500);   // deixa o App/serviço subir antes de atacar
+            return "reiniciado · " + injectMediaCenterCp();
+        } catch (Exception e) {
+            return "Erro ao reiniciar: " + e.getMessage();
+        }
+    }
+
+    /** Diagnóstico focado no hook do card — é isso que dá pra colar num relato. */
+    public static String mediaCpDiag() {
+        if (!Shizuku.pingBinder()) return "Shizuku indisponível — não consegui ler nada.";
+        StringBuilder sb = new StringBuilder();
+        sb.append("pid mediacenter = ").append(firstPid(MEDIACENTER_PROCESS)).append('\n');
+        sb.append("ps: ").append(sh("ps -A -o PID,NAME 2>/dev/null | grep -i mediacenter | grep -v grep")).append('\n');
+        sb.append("injetores: ").append(sh("ps -A -o PID,NAME,ARGS 2>/dev/null | grep -i fridainject | grep -v grep")).append('\n');
+        sb.append("fridaserver = ").append(sh("pidof fridaserver")).append('\n');
+        sb.append("ctrl (").append(MEDIA_CP_CTRL_PATH).append(") = ").append(readMediaCp()).append('\n');
+        sb.append("country code = ").append(sh("getprop persist.bean.country.code")).append('\n');
+        sb.append("-- log do hook --\n").append(mediaCpLog());
+        return sb.toString();
+    }
+
     /** Conteúdo atual do arquivo de controle (vazio = sem override). */
     public static String readMediaCp() {
         String out = sh("cat " + MEDIA_CP_CTRL_PATH + " 2>/dev/null").trim();

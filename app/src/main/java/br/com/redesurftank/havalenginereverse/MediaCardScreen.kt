@@ -195,8 +195,15 @@ fun MediaCardTab() {
                 McButton("abrir mídia", !busy, Color(0xFF00695C), Modifier.weight(1f)) {
                     run("abrir MediaCenter") { FridaUtils.openMediaCenter() }
                 }
-                McButton("ver log do hook", !busy, Color(0xFF37474F), Modifier.weight(1f)) {
-                    run("ler log") { FridaUtils.mediaCpLog() }
+                McButton("diagnóstico", !busy, Color(0xFF37474F), Modifier.weight(1f)) {
+                    run("diagnóstico") { FridaUtils.mediaCpDiag() }
+                }
+            }
+            McButton("não pegou? reiniciar mídia + reinjetar", !busy, Color(0xFF1565C0)) {
+                run("reiniciar + reinjetar") {
+                    val r = FridaUtils.restartMediaCenterAndInject()
+                    if (r.contains("ativo")) hooked = true
+                    r
                 }
             }
             McButton("remover hook (volta ao de fábrica)", !busy, Color(0xFF455A64)) {
@@ -204,6 +211,12 @@ fun MediaCardTab() {
                     val r = FridaUtils.stopMediaCenterCp(); hooked = false; r
                 }
             }
+            Text(
+                "O diagnóstico mostra pid da mídia, injetores rodando, o arquivo de controle e " +
+                    "o log do hook (\"hook OK …\" / \"autoteste: getCPList() atual = …\"). " +
+                    "Se não houver linha de hook, a injeção não subiu.",
+                color = Color(0xFF546E7A), fontSize = 10.sp
+            )
         }
 
         // ── Card: log ────────────────────────────────────────────────────
