@@ -48,6 +48,20 @@ Java.perform(function () {
         "Dazn":       "6176B10C0C42A60001000008"
     };
 
+    // URL npwas:// de cada CP (h5.ui/res/raw/app_list.txt). O content shell do
+    // h5.ui é exported e aceita VIEW com scheme npwa/npwas, então isso abre a PWA
+    // sem depender do provisionamento no com.beantechs.mediacenter.h5.core.
+    var URLS = {
+        550: "npwas://music.amazon.com/?ua=mobile",
+        551: "npwas://ver.netrange.com/twine4car.deezer/production/v1/index.html",
+        552: "npwas://www.youtube.com/?app=desktop&persist_app=1&ua=default",
+        553: "npwas://tunein.com/radio/music/",
+        554: "npwas://dazn.com",
+        555: "npwas://www.reuters.com/video/?ua=mobile",
+        556: "npwas://access-bt-gwm-9zcb4r.radioline.co/"
+    };
+    var H5_UI_PKG = "com.beantechs.mediacenter.h5.ui";
+
     // null = não interferir; [] = lista vazia; [551,...] = lista fixa.
     var desired = null;
     var lastRaw = null;        // marcador "ainda não li"
@@ -141,13 +155,17 @@ Java.perform(function () {
     } catch (e) { /* API interna pode não existir */ }
 
     // (4) fallback do id do app H5.
+    var loggedFallback = {};
     try {
         var PTM = Java.use("com.beantechs.mediacenter.h5.sdk.ProviderTypeManager");
         PTM.getProviderType.implementation = function (name) {
             var r = this.getProviderType(name);
             if ((r === null || ("" + r) === "") && name !== null && IDS[("" + name)]) {
                 var id = IDS[("" + name)];
-                log("providerType(" + name + ") vazio -> usando id do catálogo " + id);
+                if (!loggedFallback[("" + name)]) {
+                    loggedFallback[("" + name)] = true;
+                    log("providerType(" + name + ") vazio no mapa real -> id do catálogo " + id);
+                }
                 return id;
             }
             return r;
@@ -214,6 +232,84 @@ Java.perform(function () {
             }
         });
     }
+
+
+    /**
+     * (5) O clique do card chama skipApp4OnlineOs(cp), que termina em
+     * IAppControlCall.launcher(id) — e esse id só vale se o app estiver
+     * provisionado no com.beantechs.mediacenter.h5.core (o mapa do
+     * ProviderTypeManager vem DELE, via getProviderAppList). Quando o mapa real
+     * não tem o nome, o launcher(id) não abre nada. Aí abrimos a PWA na mão,
+     * por Intent VIEW npwas:// no content shell do h5.ui (exported/BROWSABLE).
+     */
+    function realProviderId(name) {
+        try {
+            var map = Java.use("com.beantechs.mediacenter.h5.sdk.ProviderTypeManager")
+                .PROVIDER_TYPE_MAP.value;
+            var v = map.get(name);
+            return (v === null) ? "" : ("" + v);
+        } catch (e) {
+            log("realProviderId err: " + e);
+            return "";
+        }
+    }
+
+    function openPwa(url) {
+        try {
+            var ctx = Java.use("android.app.ActivityThread")
+                .currentApplication().getApplicationContext();
+            var Intent = Java.use("android.content.Intent");
+            var Uri = Java.use("android.net.Uri");
+            var i = Intent.$new.overload("java.lang.String", "android.net.Uri")
+                .call(Intent, "android.intent.action.VIEW", Uri.parse(url));
+            i.setPackage(H5_UI_PKG);
+            i.addFlags(0x10000000);   // FLAG_ACTIVITY_NEW_TASK
+            ctx.startActivity(i);
+            log("aberto por intent: " + url);
+            return true;
+        } catch (e) {
+            log("openPwa err: " + e);
+            return false;
+        }
+    }
+
+    try {
+        var OnlineOsUtil = Java.use("com.beantechs.mediacenter.core_onlineosmodel.utils.OnlineOsUtil");
+        Java.use(IMPL_CLS).skipApp4OnlineOs.implementation = function (cp) {
+            var name = "";
+            try {
+                // getProviderType tem 3 sobrecargas — precisa desambiguar.
+                name = "" + OnlineOsUtil.INSTANCE.value
+                    .getProviderType.overload("int").call(OnlineOsUtil.INSTANCE.value, cp);
+            } catch (e) { log("getProviderType(" + cp + ") err: " + e); }
+            var provisioned = (name === "") ? "" : realProviderId(name);
+            log("clique cp=" + cp + " nome=" + name +
+                " provisionado=" + (provisioned === "" ? "NÃO" : provisioned));
+            if (provisioned !== "") return this.skipApp4OnlineOs(cp);   // caminho OEM
+            var url = URLS[cp];
+            if (url !== undefined && openPwa(url)) return;
+            return this.skipApp4OnlineOs(cp);   // sem URL conhecida: deixa o OEM tentar
+        };
+        log("hook OK skipApp4OnlineOs (clique)");
+    } catch (e) {
+        log("hook FALHOU skipApp4OnlineOs: " + e);
+    }
+
+    // Diagnóstico: o que o provisionamento conhece, e se o h5.core existe.
+    try {
+        var map = Java.use("com.beantechs.mediacenter.h5.sdk.ProviderTypeManager")
+            .PROVIDER_TYPE_MAP.value;
+        log("PROVIDER_TYPE_MAP = " + map.toString());
+    } catch (e) { log("dump do mapa falhou: " + e); }
+    try {
+        var pm = Java.use("android.app.ActivityThread")
+            .currentApplication().getApplicationContext().getPackageManager();
+        ["com.beantechs.mediacenter.h5.core", "com.beantechs.mediacenter.h5.ui"].forEach(function (p) {
+            var ok = true;
+            try { pm.getPackageInfo(p, 0); } catch (e) { ok = false; }
+            log("pacote " + p + " instalado = " + ok);
+        });
+    } catch (e) { log("check de pacotes falhou: " + e); }
 
     setInterval(function () {
         Java.perform(function () {

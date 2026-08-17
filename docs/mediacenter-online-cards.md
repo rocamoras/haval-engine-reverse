@@ -282,3 +282,35 @@ aparece, mas o clique pode não abrir nada.
 Requisitos: APK "fat" (com os binários do Frida 16.x em `res/raw`) + Shizuku ativo, igual às
 abas Tela/Clima. O `am force-stop` só é usado em "remover hook" — aplicar a lista não reinicia
 nada, senão a injeção morreria junto com o processo.
+
+## 9. O clique: o id do catálogo não basta (v2.21.4)
+
+Com o card já mostrando o TuneIn (v2.21.3), o clique não abria nada. O log da injeção:
+
+```
+[mc-cp] card repintado: [553]
+[mc-cp] providerType(TuneIn) vazio -> usando id do catálogo 611D7A9A0C42A60001000017
+```
+
+"vazio" = o `PROVIDER_TYPE_MAP` real não tem `TuneIn`. E o `launcher(id)` não abre a PWA
+sozinho — ele fala por AIDL com um **terceiro app**:
+
+```
+H5SdkAppServiceImpl.serviceAction()  = "com.beantechs.mediacenter.h5.core.action.LaunchManager"
+H5SdkAppServiceImpl.servicePackage() = "com.beantechs.mediacenter.h5.core"
+H5SdkBaseAppService.bindService()    -> fallback p/ componente
+                                        com.beantechs.mediacenter.h5.core/…OnlineManagerService
+```
+
+É o `h5.core` que devolve `getProviderAppList()` (`AppInfo.name` → `AppInfo.id`), e é dele que
+`ProviderTypeManager` se alimenta em `binderConnected()`. Um id que ele não provisionou é
+ignorado. Note que o `h5.core` **não está** em `apks_oem/` — só o `h5.ui`.
+
+Contorno implementado: o hook intercepta `OnlineOsModelImpl.skipApp4OnlineOs(cp)` e,
+quando o nome não está no mapa real, abre a PWA por conta própria com
+`Intent(ACTION_VIEW, npwas://…)` + `setPackage("com.beantechs.mediacenter.h5.ui")` — o content
+shell NFBE é exported e BROWSABLE, então não depende de provisionamento. Se o nome ESTÁ no mapa,
+o caminho OEM é preservado.
+
+O script agora também loga, no start, `PROVIDER_TYPE_MAP` inteiro e se `h5.core`/`h5.ui` estão
+instalados — é o que decide se o caminho certo é provisionar no `h5.core` ou seguir por intent.

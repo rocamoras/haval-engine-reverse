@@ -276,6 +276,22 @@ public class FridaUtils {
         return sb.toString();
     }
 
+    /**
+     * Abre uma PWA direto no content shell do h5.ui, sem passar pela MediaCenter.
+     * Serve para isolar se o shell aceita qualquer URL npwas:// ou se o app
+     * precisa estar provisionado no com.beantechs.mediacenter.h5.core.
+     */
+    public static String openPwaDirect(String npwasUrl) {
+        try {
+            String out = ShizukuUtils.runCommandAndGetOutput(new String[]{
+                    "am", "start", "-a", "android.intent.action.VIEW",
+                    "-d", npwasUrl, "-p", "com.beantechs.mediacenter.h5.ui"});
+            return "am start -> " + (out == null ? "" : out.trim());
+        } catch (Exception e) {
+            return "Erro ao abrir PWA: " + e.getMessage();
+        }
+    }
+
     /** Conteúdo atual do arquivo de controle (vazio = sem override). */
     public static String readMediaCp() {
         String out = sh("cat " + MEDIA_CP_CTRL_PATH + " 2>/dev/null").trim();

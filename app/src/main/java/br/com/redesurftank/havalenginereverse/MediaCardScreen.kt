@@ -199,6 +199,11 @@ fun MediaCardTab() {
                     run("diagnóstico") { FridaUtils.mediaCpDiag() }
                 }
             }
+            McButton("testar TuneIn direto (npwas://)", !busy, Color(0xFF4527A0)) {
+                run("abrir TuneIn por intent") {
+                    FridaUtils.openPwaDirect("npwas://tunein.com/radio/music/")
+                }
+            }
             McButton("não pegou? reiniciar mídia + reinjetar", !busy, Color(0xFF1565C0)) {
                 run("reiniciar + reinjetar") {
                     val r = FridaUtils.restartMediaCenterAndInject()
