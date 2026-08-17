@@ -15,8 +15,8 @@ android {
         applicationId = "br.com.redesurftank.havalenginereverse"
         minSdk = 28
         targetSdk = 28
-        versionCode = 44
-        versionName = "2.21.2"
+        versionCode = 45
+        versionName = "2.21.3"
     }
 
     signingConfigs {
@@ -60,6 +60,33 @@ android {
         compose = true
     }
 }
+
+/**
+ * Um byte de controle (NUL, p.ex.) dentro de um script Frida faz o parser abortar
+ * com "SyntaxError: unexpected end of string": o hook nunca roda e nada disso
+ * aparece no build nem no app — só no log da injeção, dentro do carro. Falha aqui.
+ */
+val checkFridaScripts = tasks.register("checkFridaScripts") {
+    val rawDir = layout.projectDirectory.dir("src/main/res/raw").asFile
+    doLast {
+        val problems = (rawDir.listFiles() ?: emptyArray())
+            .filter { it.name.endsWith(".js") }
+            .mapNotNull { f ->
+                val idx = f.readBytes().indexOfFirst {
+                    val v = it.toInt() and 0xFF
+                    v < 9 || v in 11..12 || v in 14..31
+                }
+                if (idx >= 0) "${f.name}: byte de controle no offset $idx" else null
+            }
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                "script Frida com byte de controle (o parser do Frida aborta):\n" +
+                    problems.joinToString("\n")
+            )
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(checkFridaScripts) }
 
 kotlin {
     jvmToolchain(11)
