@@ -31,27 +31,30 @@ import java.util.Locale
  * Detalhes: docs/mediacenter-online-cards.md + res/raw/com_beantechs_mediacenter_cp.js
  */
 
-/** Um CP que o loadOnlineMusicCard() sabe desenhar (id → nome/ícone). */
+/** Um CP que o loadOnlineMusicCard() sabe desenhar. */
 private data class Cp(
     val id: Int,
     val label: String,
-    /** nome usado por OnlineOsUtil.getProviderType → ProviderTypeManager */
-    val provider: String,
-    /** true quando o nome casa com um título do catálogo do h5.ui */
-    val inCatalog: Boolean
+    /** como o clique é resolvido nesta central (ver docs/mediacenter-online-cards.md §10) */
+    val how: String
 )
 
+/**
+ * `how` vem do PROVIDER_TYPE_MAP real, lido do h5.core na central:
+ * provisionados abrem pelo caminho OEM (minibar/sessão de mídia); o resto abre
+ * por Intent npwas:// no content shell.
+ */
 private val CPS = listOf(
-    Cp(551, "Deezer", "Deezer", true),
-    Cp(553, "TuneIn", "TuneIn", true),
-    Cp(556, "Radioline", "Radioline", true),
-    Cp(555, "Reuters TV", "Reuters TV", true),
-    Cp(552, "YouTube", "Youtube", true),
-    Cp(550, "Amazon Music", "Amazon", false),
-    Cp(554, "DAZN", "Dazn", false),
-    Cp(557, "ESPN", "ESPN", false),
-    Cp(503, "JOOX", "joox", false),
-    Cp(504, "myTuner", "mytuner", false)
+    Cp(551, "Deezer", "OEM"),
+    Cp(552, "YouTube", "OEM"),
+    Cp(555, "Reuters TV", "OEM"),
+    Cp(557, "ESPN", "OEM"),
+    Cp(553, "TuneIn", "intent"),
+    Cp(556, "Radioline", "intent"),
+    Cp(550, "Amazon Music", "intent"),
+    Cp(554, "DAZN", "intent"),
+    Cp(503, "JOOX", "—"),
+    Cp(504, "myTuner", "—")
 )
 
 @Composable
@@ -149,9 +152,10 @@ fun MediaCardTab() {
             Text("Montar a lista", color = Color(0xFF80CBC4), fontSize = 12.sp,
                 fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
             Text(
-                "A ordem dos ícones segue a ordem de seleção. Os marcados com ⚠ têm nome " +
-                    "que não casa com o catálogo do runtime H5 — o ícone aparece, mas o " +
-                    "clique pode não abrir nada.",
+                "A ordem dos ícones segue a ordem de seleção. \"OEM\" = provisionado no " +
+                    "h5.core desta central, abre pelo fluxo original (minibar, sessão de " +
+                    "mídia). \"intent\" = não provisionado, o hook abre a PWA por " +
+                    "npwas:// no content shell. \"—\" = sem app correspondente aqui.",
                 color = Color(0xFF90A4AE), fontSize = 10.sp
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -164,7 +168,7 @@ fun MediaCardTab() {
                         },
                         label = {
                             Text(
-                                (if (cp.inCatalog) "" else "⚠ ") + cp.label + "  ${cp.id}",
+                                cp.label + "  ${cp.id} · ${cp.how}",
                                 fontSize = 11.sp
                             )
                         }

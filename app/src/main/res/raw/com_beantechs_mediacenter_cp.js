@@ -36,16 +36,24 @@ Java.perform(function () {
     var Integer    = Java.use("java.lang.Integer");
     var IMPL_CLS   = "com.beantechs.mediacenter.core_onlineosmodel.OnlineOsModelImpl";
 
-    // ids do catálogo embutido do h5.ui (res/raw/app_list.txt), por nome do
-    // ProviderTypeManager. Usado só se o mapa real vier vazio.
-    var IDS = {
-        "Deezer":     "6131F97C0C42A60001000002",
-        "TuneIn":     "611D7A9A0C42A60001000017",
-        "Radioline":  "611D6F1F0C42A60001000016",
-        "Reuters TV": "61238F990C42A6000100001A",
-        "Youtube":    "6181A5990C42A6000100000C",
-        "Amazon":     "615C3EEE0C42A60001000003",
-        "Dazn":       "6176B10C0C42A60001000008"
+    /**
+     * Nome do provider por CP: primeiro o nome que o OEM usa
+     * (OnlineOsUtil.getProviderType), depois aliases com que o servidor
+     * realmente provisionou nesta central. Ex.: o OEM procura "Reuters TV",
+     * mas o provisionado é "Reuter TV"; "Amazon" vs "Amazon Music"; "Dazn" vs
+     * "DAZN". Sem o alias, o caminho OEM falha por diferença de nome.
+     */
+    var NAMES = {
+        550: ["Amazon", "Amazon Music"],
+        551: ["Deezer"],
+        552: ["Youtube", "YouTube (mobile)"],
+        553: ["TuneIn"],
+        554: ["Dazn", "DAZN"],
+        555: ["Reuters TV", "Reuter TV"],
+        556: ["Radioline"],
+        557: ["ESPN"],
+        503: ["JOOX"],
+        504: ["MY_TUNER"]
     };
 
     // URL npwas:// de cada CP (h5.ui/res/raw/app_list.txt). O content shell do
@@ -154,20 +162,39 @@ Java.perform(function () {
             .currentProcessName());
     } catch (e) { /* API interna pode não existir */ }
 
-    // (4) fallback do id do app H5.
-    var loggedFallback = {};
+    /**
+     * (4) O id do catálogo do h5.ui NÃO serve: o h5.core faz
+     * CookieManager.getCookie(id) e, sem cookie, devolve erro sem abrir nada.
+     * O que serve é resolver o nome pelo ALIAS que o servidor provisionou —
+     * aí o id vem do mapa real e o caminho OEM funciona inteiro (minibar,
+     * sessão de mídia, controles do volante).
+     */
+    var loggedOnce = {};
+    function logOnce(key, msg) {
+        if (loggedOnce[key]) return;
+        loggedOnce[key] = true;
+        log(msg);
+    }
+
     try {
         var PTM = Java.use("com.beantechs.mediacenter.h5.sdk.ProviderTypeManager");
         PTM.getProviderType.implementation = function (name) {
             var r = this.getProviderType(name);
-            if ((r === null || ("" + r) === "") && name !== null && IDS[("" + name)]) {
-                var id = IDS[("" + name)];
-                if (!loggedFallback[("" + name)]) {
-                    loggedFallback[("" + name)] = true;
-                    log("providerType(" + name + ") vazio no mapa real -> id do catálogo " + id);
+            if (r !== null && ("" + r) !== "") return r;
+            var key = "" + name;
+            for (var cp in NAMES) {
+                var alts = NAMES[cp];
+                if (alts[0] !== key) continue;
+                for (var i = 1; i < alts.length; i++) {
+                    var v = realProviderId(alts[i]);
+                    if (v !== "") {
+                        logOnce("alias:" + key,
+                            "alias " + key + " -> " + alts[i] + " = " + v);
+                        return v;
+                    }
                 }
-                return id;
             }
+            logOnce("miss:" + key, "provider \"" + key + "\" não provisionado neste veículo");
             return r;
         };
         log("hook ProviderTypeManager aplicado");
@@ -273,20 +300,27 @@ Java.perform(function () {
         }
     }
 
+    /** {name, id} do primeiro alias provisionado do CP, ou null. */
+    function resolveProvisioned(cp) {
+        var alts = NAMES[cp];
+        if (alts === undefined) return null;
+        for (var i = 0; i < alts.length; i++) {
+            var id = realProviderId(alts[i]);
+            if (id !== "") return { name: alts[i], id: id };
+        }
+        return null;
+    }
+
     try {
-        var OnlineOsUtil = Java.use("com.beantechs.mediacenter.core_onlineosmodel.utils.OnlineOsUtil");
         Java.use(IMPL_CLS).skipApp4OnlineOs.implementation = function (cp) {
-            var name = "";
-            try {
-                // getProviderType tem 3 sobrecargas — precisa desambiguar.
-                name = "" + OnlineOsUtil.INSTANCE.value
-                    .getProviderType.overload("int").call(OnlineOsUtil.INSTANCE.value, cp);
-            } catch (e) { log("getProviderType(" + cp + ") err: " + e); }
-            var provisioned = (name === "") ? "" : realProviderId(name);
-            log("clique cp=" + cp + " nome=" + name +
-                " provisionado=" + (provisioned === "" ? "NÃO" : provisioned));
-            if (provisioned !== "") return this.skipApp4OnlineOs(cp);   // caminho OEM
+            var hit = resolveProvisioned(cp);
+            if (hit !== null) {
+                log("clique cp=" + cp + " -> " + hit.name + " provisionado (" +
+                    hit.id + "), caminho OEM");
+                return this.skipApp4OnlineOs(cp);
+            }
             var url = URLS[cp];
+            log("clique cp=" + cp + " não provisionado -> intent " + url);
             if (url !== undefined && openPwa(url)) return;
             return this.skipApp4OnlineOs(cp);   // sem URL conhecida: deixa o OEM tentar
         };

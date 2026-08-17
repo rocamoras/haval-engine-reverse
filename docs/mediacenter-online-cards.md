@@ -314,3 +314,58 @@ o caminho OEM é preservado.
 
 O script agora também loga, no start, `PROVIDER_TYPE_MAP` inteiro e se `h5.core`/`h5.ui` estão
 instalados — é o que decide se o caminho certo é provisionar no `h5.core` ou seguir por intent.
+
+## 10. Quem está provisionado de verdade (log da central, 2026-08-17)
+
+O `PROVIDER_TYPE_MAP` lido em runtime na central (dump do hook) — chave vazia = nome que o
+`ProviderTypeManager.init()` registra mas que o provisionamento não conhece:
+
+```
+Deezer            = 6131F97C0C42A60001000002
+ESPN              = 697A2D92CBA38E0001000003
+Reuter TV         = 61B9D0780C42A60001000017
+Youtube           = 6181A5990C42A6000100000C
+YouTube (mobile)  = 619FF6480C42A6000100000F
+Apple Music       = 65DC4401BBE3E50001000001
+TuneIn=, Radioline=, Amazon=, Dazn=, Reuters TV=, JOOX=, MY_TUNER=,
+KIDOMI=, PLUTO_TV=, EURONEWS=, STINGRAY_MUSIC=, WALL_STREET=,
+GOGGLES_CARTOONS=, DEUTSCHE_WELLE_TV=
+```
+
+Três coisas importantes saem daí:
+
+1. **O `enable` do `assets/cp_list.xml` do h5.core é irrelevante** — `Util.getProvidersFromAssets()`
+   não tem nenhum chamador (código morto). A prova nos dados: `Radioline` tem `enable=true` no
+   asset e está **vazio** em runtime, e os ids de `ESPN`/`Reuters TV` em runtime não são os do
+   asset. A lista real vem de `CookieManager.getProvidedAppInfoList()`, alimentada pelo servidor.
+2. **`launcher(id)` precisa de cookie.** Em `H5CoreAppServiceStubImpl.launcher(providerType,…)`:
+   `cookie = CookieManager.getCookie(providerType)`; vazio → `onResult(erro)` e nada abre.
+   Com cookie → `ILocalReceiveListener.launcher(id, cb)` no h5.ui. Por isso id de catálogo não
+   funciona: não existe cookie pra um app não provisionado.
+3. **Diferença de nome derruba o caminho OEM sozinha.** O OEM procura `Reuters TV`, `Amazon` e
+   `Dazn`; o provisionamento tem `Reuter TV` (sem s), `Amazon Music` e `DAZN`. O hook agora
+   resolve por alias, então o **Reuters (555) passa a abrir pelo fluxo original**.
+
+Resultado por CP nesta central:
+
+| CP | app | como abre |
+|---|---|---|
+| 551 | Deezer | OEM (provisionado) |
+| 552 | YouTube | OEM (provisionado) |
+| 555 | Reuters TV | OEM via alias `Reuter TV` |
+| 557 | ESPN | OEM (provisionado) |
+| 553 | TuneIn | Intent `npwas://tunein.com/radio/music/` |
+| 556 | Radioline | Intent |
+| 550 | Amazon Music | Intent |
+| 554 | DAZN | Intent |
+| 503/504 | JOOX / myTuner | sem app aqui |
+
+**Apple Music** (`65DC4401BBE3E50001000001`) está provisionado e **não tem CP** no
+`loadOnlineMusicCard()` — não há ícone pra ele no APK da MediaCenter. Daria pra pendurar num
+slot livre (ex. 550) resolvendo o nome pra `Apple Music`, mas o ícone desenhado seria o do
+Amazon. Fica registrado como possibilidade.
+
+Sobre integração de mídia no caminho por intent: o `assets/mediasession_filter.json` do h5.ui
+casa por **URL** (`tunein.com`, `radioline.co`, `reuters.com`, `twine4car.deezer`), não por
+provisionamento — então minibar e controles do volante têm chance de funcionar mesmo abrindo
+por intent. Vale confirmar tocando algo.
