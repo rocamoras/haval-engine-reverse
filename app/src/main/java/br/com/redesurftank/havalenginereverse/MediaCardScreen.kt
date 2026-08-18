@@ -86,15 +86,15 @@ fun MediaCardTab() {
         }
     }
 
-    /** Ativa o hook (se preciso) e aplica a lista atual em um passo. */
-    fun apply(ids: List<Int>, what: String) {
+    /** Ativa o hook (se preciso) e escreve o arquivo de controle em um passo. */
+    fun applyRaw(csv: String, what: String) {
         if (busy) return
         busy = true; addLog("aplicar $what…")
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 val sb = StringBuilder()
                 if (!hooked) sb.append(FridaUtils.injectMediaCenterCp()).append(" · ")
-                sb.append(FridaUtils.writeMediaCp(ids.joinToString(",")))
+                sb.append(FridaUtils.writeMediaCp(csv))
                 sb.toString()
             }
             if (res.contains("ativo")) hooked = true
@@ -103,6 +103,8 @@ fun MediaCardTab() {
             busy = false
         }
     }
+
+    fun apply(ids: List<Int>, what: String) = applyRaw(ids.joinToString(","), what)
 
     LaunchedEffect(Unit) {
         current = withContext(Dispatchers.IO) { FridaUtils.readMediaCp() }
@@ -135,6 +137,10 @@ fun MediaCardTab() {
             McButton("B · remover todos (card vazio)", !busy, Color(0xFFB71C1C)) {
                 selected.clear()
                 apply(emptyList(), "nenhum ícone")
+            }
+            McButton("C · esconder o menu inteiro (título + fileira)", !busy, Color(0xFF6D4C41)) {
+                selected.clear()
+                applyRaw("off", "bloco escondido")
             }
             McButton("voltar ao padrão (só Deezer)", !busy, Color(0xFF37474F)) {
                 selected.clear(); selected.add(551)

@@ -70,7 +70,9 @@ Java.perform(function () {
     };
     var H5_UI_PKG = "com.beantechs.mediacenter.h5.ui";
 
-    // null = não interferir; [] = lista vazia; [551,...] = lista fixa.
+    // null = não interferir; [] = fileira vazia; [551,...] = lista fixa;
+    // HIDDEN = esconde o bloco inteiro (título + HorizontalScrollView).
+    var HIDDEN = "off";
     var desired = null;
     var lastRaw = null;        // marcador "ainda não li"
 
@@ -82,7 +84,9 @@ Java.perform(function () {
             var line = br.readLine();
             br.close();
             var raw = (line === null ? "" : ("" + line)).trim();
-            if (raw === "" || raw.toLowerCase() === "none") return [];
+            var low = raw.toLowerCase();
+            if (low === "off" || low === "hide") return HIDDEN;
+            if (raw === "" || low === "none") return [];
             var out = [];
             raw.split(",").forEach(function (p) {
                 var n = parseInt(("" + p).trim(), 10);
@@ -96,7 +100,35 @@ Java.perform(function () {
         }
     }
 
-    function rawOf(list) { return list === null ? "(passthrough)" : list.join(","); }
+    function rawOf(list) {
+        if (list === null) return "(passthrough)";
+        if (list === HIDDEN) return "off";
+        return list.join(",");
+    }
+
+    /** A lista de ícones para o estado atual ("off" também zera a fileira). */
+    function wantedList() { return (desired === HIDDEN) ? [] : desired; }
+
+    /**
+     * Título e fileira são views do layout activity_media_center; some com as
+     * duas para "desabilitar o menu". Como o ConstraintLayout ancora tudo no
+     * topo do pai (margens fixas, sem encadeamento), o resto NÃO sobe — sobra
+     * o espaço, que é onde daria pra pôr outra coisa.
+     */
+    function setBlockVisible(act, visible) {
+        var vis = visible ? 0 : 8;   // VISIBLE : GONE
+        ["online_music", "horizontalScrollView"].forEach(function (n) {
+            try {
+                var id = act.getResources()
+                    .getIdentifier(n, "id", "com.beantechs.mediacenter");
+                if (id === 0) { log("id " + n + " não encontrado"); return; }
+                var v = act.findViewById(id);
+                if (v === null) { log("view " + n + " não está inflada"); return; }
+                v.setVisibility(vis);
+            } catch (e) { log("setBlockVisible(" + n + ") err: " + e); }
+        });
+        log("bloco de mídia online " + (visible ? "visível" : "escondido"));
+    }
 
     // Um Integer[] pro Frida é um array JS de wrappers Integer — é assim que o
     // bridge marshala tanto em argumento quanto em retorno. (Tentar montar via
@@ -128,7 +160,7 @@ Java.perform(function () {
             orig.implementation = function () {
                 if (desired === null) return this[name]();
                 try {
-                    return buildArr(desired);
+                    return buildArr(wantedList());
                 } catch (e) {
                     log("buildArr err: " + e);
                     return this[name]();
@@ -212,7 +244,7 @@ Java.perform(function () {
         if (desired === null) return 0;
         var n = 0;
         try {
-            var arr = buildArr(desired);
+            var arr = buildArr(wantedList());
             Java.choose(IMPL_CLS, {
                 onMatch: function (inst) {
                     try { inst.setMCpList(arr); n++; }
@@ -253,6 +285,7 @@ Java.perform(function () {
         Java.scheduleOnMainThread(function () {
             try {
                 act.loadOnlineMusicCard();
+                setBlockVisible(act, desired !== HIDDEN);
                 log("card repintado: [" + rawOf(desired) + "]");
             } catch (e) {
                 log("repaint err (activity morta?): " + e);

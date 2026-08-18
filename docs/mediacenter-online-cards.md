@@ -369,3 +369,54 @@ Sobre integração de mídia no caminho por intent: o `assets/mediasession_filte
 casa por **URL** (`tunein.com`, `radioline.co`, `reuters.com`, `twine4car.deezer`), não por
 provisionamento — então minibar e controles do volante têm chance de funcionar mesmo abrindo
 por intent. Vale confirmar tocando algo.
+
+## 11. Desabilitar o bloco, e o que dá pra pôr no lugar (v2.22.0)
+
+O "menu de mídia online" é só na tela principal do app de mídia — a **launcher não tem**:
+nenhum layout dela menciona mídia e o id `media_online_music_record` não existe no
+`resources.arsc` (a string no dex é resíduo).
+
+`res/layout-1792x1080/activity_media_center.xml`:
+
+```
+TextView             id/online_music           text=string/main_online_music_title   <- título
+HorizontalScrollView id/horizontalScrollView                                         <- fileira
+  └ LinearLayout     id/online_music_container                                       <- os ícones
+TextView             id/local_media            text=string/main_local_media_title
+5x ConstraintLayout (binding_1..5)                                                   <- fontes locais
+```
+
+Todo elemento é ancorado no **topo do pai** (`layout_constraintTop_toTopOf="0"` + margem fixa),
+sem encadeamento entre eles. Consequência prática: esconder a fileira **não faz o resto subir** —
+o espaço fica vago (e disponível).
+
+Implementado: o arquivo de controle aceita `off` (além de CSV e `none`), e o hook chama
+`setVisibility(GONE)` em `online_music` + `horizontalScrollView`, resolvendo os ids por
+`getResources().getIdentifier(...)`. Botão "C · esconder o menu inteiro" na aba.
+
+Três estados agora:
+
+| `/data/local/tmp/inject_media_cp` | efeito |
+|---|---|
+| ausente | comportamento de fábrica |
+| `none` (ou vazio) | título fica, fileira sem nenhum ícone |
+| `off` | título e fileira somem |
+| `553,556,…` | fileira com esses CPs |
+
+### O que daria pra mostrar ali
+
+O `online_music_container` é um `LinearLayout` que já é reconstruído por nós a cada
+`loadOnlineMusicCard()` — dá pra adicionar qualquer `View` filha, com qualquer ação no clique
+(o OEM mesmo faz isso, guardando o id do CP na `elevation`). Caminhos viáveis:
+
+1. **Atalhos livres**: ícone + clique abrindo qualquer PWA (`npwas://…`) ou qualquer pacote
+   (`am start`/Intent). Sem depender de provisionamento, como o TuneIn já faz hoje.
+2. **Apps provisionados sem CP**: `Apple Music` (`65DC4401BBE3E50001000001`) está provisionado e
+   não tem slot no `switch` do OEM — daria pra pendurar num CP livre resolvendo o nome, mas o
+   ícone desenhado seria o do slot usado (não existe drawable de Apple Music no APK).
+3. **Widget de informação** no lugar da fileira: qualquer `View` construída em runtime
+   (texto/valor), no espaço que sobra com o bloco escondido — ex. temperatura externa, que já
+   temos lendo `car.basic.outside_temp`.
+
+Ícone customizado exige bitmap: ou um PNG solto em `/data/local/tmp` via `BitmapFactory`, ou algo
+desenhado em runtime (`ShapeDrawable` + texto).
