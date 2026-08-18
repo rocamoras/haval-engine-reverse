@@ -1,0 +1,93 @@
+==== FRIDA DIAG ====
+app versionName: 2.24.0
+
+== frida version ==
+16.7.19
+== processos frida ==
+6841 fridaserver
+15891 fridainjector
+17429 fridainjector
+== pids alvo ==
+systemui=7966
+launcher=8548
+mediacenter=8605
+
+== inject_weather ==
+24|100|Ensolarado|24|24
+== inject_media_cp ==
+widget
+== country code ==
+persist.bean.country.code=17
+gwm.special.country.export=17
+
+== LOG mediacenter (card) ==
+[mc-cp] hook OK MediaCenterManager.getCPList
+[mc-cp] hook OK OnlineOsImpl.getCPList
+[mc-cp] hook OK OnlineOsModelImpl.getCPList
+[mc-cp] hook OK OnlineOsModelImpl.getMCpList
+[mc-cp] autoteste: getCPList() atual = [551]
+[mc-cp] processo = com.beantechs.mediacenter
+[mc-cp] hook ProviderTypeManager aplicado
+[mc-cp] hook OK skipApp4OnlineOs (clique)
+[mc-cp] PROVIDER_TYPE_MAP = {GOGGLES_CARTOONS=, KIDOMI=, PLUTO_TV=, TuneIn=, Radioline=, Deezer=6131F97C0C42A60001000002, JOOX=, ESPN=697A2D92CBA38E0001000003, EURONEWS=, MY_TUNER=, STINGRAY_MUSIC=, Dazn=, Reuter TV=61B9D0780C42A60001000017, YouTube (mobile)=619FF6480C42A6000100000F, Youtube=6181A5990C42A6000100000C, Reuters TV=, WALL_STREET=, Apple Music=65DC4401BBE3E50001000001, Amazon=, DEUTSCHE_WELLE_TV=}
+[mc-cp] pacote com.beantechs.mediacenter.h5.core instalado = true
+[mc-cp] pacote com.beantechs.mediacenter.h5.ui instalado = true
+[mc-cp] injetor de card de m?dia online ativo (alvo com.beantechs.mediacenter)
+[mc-cp] lista desejada = [553]
+[mc-cp] applyToInstances err: ReferenceError: 'buildArr' is not defined
+[mc-cp] setMCpList aplicado em 0 inst?ncia(s)
+[mc-cp] bloco de m?dia online vis?vel
+[mc-cp] card repintado: [553]
+[mc-cp] lista desejada = [off]
+[mc-cp] applyToInstances err: ReferenceError: 'buildArr' is not defined
+[mc-cp] setMCpList aplicado em 0 inst?ncia(s)
+[mc-cp] bloco de m?dia online escondido
+[mc-cp] card repintado: [off]
+[mc-cp] lista desejada = [widget]
+[mc-cp] applyToInstances err: ReferenceError: 'buildArr' is not defined
+[mc-cp] setMCpList aplicado em 0 inst?ncia(s)
+[mc-cp] bloco de m?dia online vis?vel
+[mc-cp] widget criado no container
+[mc-cp] externa veio de car.basic.outside_temp = 28.5
+[mc-cp] interna veio de car.basic.inside_temp = 25.5
+[mc-cp] card repintado: [widget]
+== LOG systemui (barra) ==
+[sysui-outtemp] hook temp externa REAL ativo (le car.basic.outside_temp -> mWeatherTemp)
+[sysui-outtemp] pintado 29? (sensor 28.5)
+== LOG launcher (hiboard) ==
+[launcher-wx] hook parseWeather aplicado
+[launcher-wx] injetor de clima ativo (alvo com.beantechs.launcher)
+[launcher-wx] pintado 24? (Ensolarado)
+[0;31mProcess crashed: Trace/BPT trap[0m
+
+***
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'qti/gwm/gwm:9/PQ1A.190105.004/bean07021019:user/test-keys'
+Revision: '0'
+ABI: 'arm64'
+pid: 2437, tid: 2437, name: ntechs.launcher  >>> com.beantechs.launcher <<<
+signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+Abort message: 'java_vm_ext.cc:542] JNI DETECTED ERROR IN APPLICATION: use of invalid jobject 0x7fd8c11554'
+    x0  0000000000000000  x1  0000000000000985  x2  0000000000000006  x3  0000000000000008
+    x4  fefeff764186f667  x5  fefeff764186f667  x6  fefeff764186f667  x7  7f7f7f7f7fffff7f
+    x8  0000000000000083  x9  fdfcf0701d580a5e  x10 0000000000000000  x11 fffffffc7ffffbdf
+    x12 0000000000000001  x13 ffffffffffffffff  x14 ffffffffff000000  x15 ffffffffffffffff
+    x16 0000007741bb12c8  x17 0000007741aef110  x18 0000000000000001  x19 0000000000000985
+    x20 0000000000000985  x21 00000076a34df300  x22 0000000000000002  x23 00000076bd60ea43
+    x24 00000076bd60e8f7  x25 0000000000000001  x26 0000007fd8c113f0  x27 0000000000000043
+    x28 00000076bdf131b0  x29 0000007fd8c112a0
+    sp  0000007fd8c11260  lr  0000007741ae3c3c  pc  0000007741ae3c64
+
+backtrace:
+    #00 pc 0000000000021c64  /system/lib64/libc.so (offset 0x21000) (abort+116)
+    #01 pc 00000000004641c4  /system/lib64/libart.so (offset 0x254000) (art::Runtime::Abort(char const*)+1196)
+    #02 pc 0000000000008cd4  /system/lib64/libbase.so (android::base::LogMessage::~LogMessage()+724)
+    #03 pc 00000000002e4e54  /system/lib64/libart.so (offset 0x254000) (art::JavaVMExt::JniAbort(char const*, char const*)+1640)
+    #04 pc 00000000002e50b4  /system/lib64/libart.so (offset 0x254000) (art::JavaVMExt::JniAbortF(char const*, char const*, ...)+180)
+    #05 pc 0000000000494914  /system/lib64/libart.so (offset 0x254000) (art::Thread::DecodeJObject(_jobject*) const+808)
+    #06 pc 000000000045db18  /system/lib64/libart.so (offset 0x254000) (art::InvokeVirtualOrInterfaceWithVarArgs(art::ScopedObjectAccessAlreadyRunnable const&, _jobject*, _jmethodID*, std::__va_list)+76)
+    #07 pc 000000000033e82c  /system/lib64/libart.so (offset 0x254000) (art::JNI::CallVoidMethod(_JNIEnv*, _jobject*, _jmethodID*, ...)+716)
+    #08 pc 0000000000155a1c  /memfd:frida-agent-64.so (deleted) (offset 0xa2f000)
+***
+== logcat (frida/temp/weather, 300) ==
+08-18 12:34:37.500  8934  8951 W FridaUtils: [frida] injetado no SystemUI pid=7966

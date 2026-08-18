@@ -122,6 +122,16 @@ Java.perform(function () {
         return (desired === HIDDEN || desired === WIDGET) ? [] : desired;
     }
 
+    // Um Integer[] pro Frida é um array JS de wrappers Integer — é assim que o
+    // bridge marshala tanto em argumento quanto em retorno. (Montar via
+    // java.lang.reflect.Array devolve um wrapper de Object que o marshaller de
+    // retorno não aceita.)
+    function buildArr(list) {
+        var out = [];
+        for (var i = 0; i < list.length; i++) out.push(Integer.valueOf(list[i]));
+        return out;
+    }
+
     /**
      * Id de recurso lido da classe R$id — acesso a CAMPO estático, sem lookup
      * de método (imune ao problema acima). Fallback com os valores extraídos do
@@ -548,6 +558,30 @@ Java.perform(function () {
             }
         });
     }, 1500);
+
+    /**
+     * Autoteste dos helpers, na injeção. Um `buildArr` que sumiu num refactor só
+     * aparecia como ReferenceError quando o usuário clicava numa opção — aqui a
+     * falha fica no log logo de cara, antes de qualquer teste no carro.
+     */
+    (function selfTest() {
+        var falhas = [];
+        [["buildArr", function () { return buildArr([551]).length === 1; }],
+         ["wantedList", function () { return wantedList !== undefined; }],
+         ["resId", function () { return resId("online_music") > 0; }],
+         ["widgetText", function () { return ("" + widgetText()).length > 0; }],
+         ["realProviderId", function () { realProviderId("Deezer"); return true; }],
+         ["resolveProvisioned", function () { resolveProvisioned(551); return true; }]
+        ].forEach(function (par) {
+            try {
+                if (par[1]() !== true) falhas.push(par[0] + " (resultado inesperado)");
+            } catch (e) {
+                falhas.push(par[0] + ": " + e);
+            }
+        });
+        if (falhas.length === 0) log("autoteste dos helpers: OK");
+        else log("autoteste dos helpers FALHOU -> " + falhas.join(" | "));
+    })();
 
     log("injetor de card de mídia online ativo (alvo com.beantechs.mediacenter)");
 });

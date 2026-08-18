@@ -533,3 +533,34 @@ próximo update de velocidade.
 
 Na aba Mídia há um seletor de três estados que grava via Shizuku, relê para confirmar e mostra o
 modo atual.
+
+## 16. Widget confirmado + regressão do `buildArr` (v2.24.1)
+
+Log de 2026-08-18 12:34 (`docs/frida_diag_20260818_123441.txt`) — widget e `off` funcionando:
+
+```
+[mc-cp] bloco de mídia online escondido
+[mc-cp] widget criado no container
+[mc-cp] externa veio de car.basic.outside_temp = 28.5
+[mc-cp] interna veio de car.basic.inside_temp = 25.5
+```
+
+**Chave da temperatura interna confirmada: `car.basic.inside_temp`** (era a primeira candidata da
+sonda), lida pelo mesmo `PlatformAdapterClient.getData` da externa.
+
+O mesmo log expôs uma regressão minha:
+
+```
+[mc-cp] applyToInstances err: ReferenceError: 'buildArr' is not defined
+[mc-cp] setMCpList aplicado em 0 instância(s)
+```
+
+O patch da v2.23.1 (troca para `Java.cast`) substituiu um trecho que continha a definição de
+`buildArr` junto com o `setBlockVisible` — a função ficou sendo chamada em dois lugares e não
+existia mais. `widget` e `off` não montam `Integer[]`, então passaram; **o caminho da lista de
+ícones ficou quebrado nas v2.23.1 e v2.24.0**. `buildArr` reinserido.
+
+Guarda contra repetir isso: autoteste no start da injeção exercitando `buildArr`, `wantedList`,
+`resId`, `widgetText`, `realProviderId` e `resolveProvisioned`. Loga
+`autoteste dos helpers: OK` ou `autoteste dos helpers FALHOU -> <quais>` na hora da injeção, em
+vez de a falha só aparecer quando alguém clica numa opção.
