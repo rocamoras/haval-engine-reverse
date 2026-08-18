@@ -204,7 +204,8 @@ public class FridaUtils {
     /**
      * Escreve a lista de CPs que deve aparecer no card. CSV de ids 501..600
      * (ex. "553" = só TuneIn). Vazio/"none" = fileira sem ícones;
-     * "off" = esconde o bloco inteiro (título + fileira).
+     * "off" = esconde o bloco inteiro (título + fileira);
+     * "widget" = fileira vira um painel de temperatura (externa/interna).
      */
     public static String writeMediaCp(String csv) {
         try {
@@ -215,6 +216,7 @@ public class FridaUtils {
             ShizukuUtils.runCommandAndGetOutput(new String[]{"chmod", "644", MEDIA_CP_CTRL_PATH});
             if ("none".equals(content)) return "Aplicado: nenhum ícone no card";
             if ("off".equals(content)) return "Aplicado: bloco de mídia online escondido";
+            if ("widget".equals(content)) return "Aplicado: widget de temperatura no lugar da fileira";
             return "Aplicado: [" + content + "]";
         } catch (Exception e) {
             Log.e(TAG, "[frida] writeMediaCp erro: " + e.getMessage(), e);

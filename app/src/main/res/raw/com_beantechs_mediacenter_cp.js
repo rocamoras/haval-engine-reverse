@@ -73,6 +73,8 @@ Java.perform(function () {
     // null = não interferir; [] = fileira vazia; [551,...] = lista fixa;
     // HIDDEN = esconde o bloco inteiro (título + HorizontalScrollView).
     var HIDDEN = "off";
+    var WIDGET = "widget";
+    var PKG    = "com.beantechs.mediacenter";
     var desired = null;
     var lastRaw = null;        // marcador "ainda não li"
 
@@ -86,6 +88,7 @@ Java.perform(function () {
             var raw = (line === null ? "" : ("" + line)).trim();
             var low = raw.toLowerCase();
             if (low === "off" || low === "hide") return HIDDEN;
+            if (low === "widget") return WIDGET;
             if (raw === "" || low === "none") return [];
             var out = [];
             raw.split(",").forEach(function (p) {
@@ -103,11 +106,14 @@ Java.perform(function () {
     function rawOf(list) {
         if (list === null) return "(passthrough)";
         if (list === HIDDEN) return "off";
+        if (list === WIDGET) return "widget";
         return list.join(",");
     }
 
-    /** A lista de ícones para o estado atual ("off" também zera a fileira). */
-    function wantedList() { return (desired === HIDDEN) ? [] : desired; }
+    /** A lista de ícones do estado atual ("off"/"widget" zeram a fileira). */
+    function wantedList() {
+        return (desired === HIDDEN || desired === WIDGET) ? [] : desired;
+    }
 
     /**
      * Título e fileira são views do layout activity_media_center; some com as
@@ -286,6 +292,7 @@ Java.perform(function () {
             try {
                 act.loadOnlineMusicCard();
                 setBlockVisible(act, desired !== HIDDEN);
+                if (desired === WIDGET) paintWidget(act);
                 log("card repintado: [" + rawOf(desired) + "]");
             } catch (e) {
                 log("repaint err (activity morta?): " + e);
@@ -378,16 +385,123 @@ Java.perform(function () {
         });
     } catch (e) { log("check de pacotes falhou: " + e); }
 
+
+    // ── (6) Widget de informação no lugar da fileira ────────────────────────
+    //
+    // Estado "widget": a fileira é esvaziada (wantedList() = []) e um TextView
+    // nosso entra no online_music_container, com o título repurposado. O bloco
+    // fica VISÍVEL — esconder o HorizontalScrollView esconderia o widget junto.
+    //
+    // O valor sai do mesmo caminho que a barra de status usa:
+    // PlatformAdapterClient.getInstance().getData("car.basic.outside_temp").
+    // A chave da temperatura interna não é conhecida: sondamos candidatas e
+    // logamos qual respondeu (aparece uma vez no log, não a cada tick).
+    var WIDGET_TAG = "mc-cp-widget";
+    var PROBE_OUT = ["car.basic.outside_temp", "car.weather.outside_temp"];
+    var PROBE_IN  = ["car.basic.inside_temp", "car.hvac.inside_temp",
+                     "car.hvac.in_car_temp", "car.basic.in_car_temp",
+                     "car.hvac.temperature"];
+
+    var PAC = null;
+    try {
+        PAC = Java.use("com.beantechs.adapterservice.client.PlatformAdapterClient");
+    } catch (e) {
+        log("PlatformAdapterClient indisponível aqui: " + e);
+    }
+    var Str      = Java.use("java.lang.String");
+    var TextView = Java.use("android.widget.TextView");
+
+    function readKey(k) {
+        if (PAC === null) return null;
+        try {
+            var raw = PAC.getInstance().getData(k);
+            if (raw === null) return null;
+            var v = parseFloat("" + raw);
+            return isNaN(v) ? null : v;
+        } catch (e) { return null; }
+    }
+
+    /** Primeiro candidato com valor plausível de temperatura, ou null. */
+    function probeTemp(keys, label) {
+        for (var i = 0; i < keys.length; i++) {
+            var v = readKey(keys[i]);
+            if (v !== null && v > -50.0 && v < 90.0) {
+                logOnce("key:" + label, label + " veio de " + keys[i] + " = " + v);
+                return v;
+            }
+        }
+        logOnce("keymiss:" + label,
+            label + ": nenhuma chave respondeu (" + keys.join(", ") + ")");
+        return null;
+    }
+
+    function fmtTemp(v) {
+        return (v === null) ? "--" : (Math.round(v * 10) / 10) + "°C";
+    }
+
+    function widgetText() {
+        return "Externa " + fmtTemp(probeTemp(PROBE_OUT, "externa")) +
+               "      Interna " + fmtTemp(probeTemp(PROBE_IN, "interna"));
+    }
+
+    /** Cria (ou só atualiza) o TextView do widget. Roda na main thread. */
+    function paintWidget(act) {
+        try {
+            var res = act.getResources();
+            var idBox = res.getIdentifier("online_music_container", "id", PKG);
+            var idTitle = res.getIdentifier("online_music", "id", PKG);
+            if (idBox === 0) { log("online_music_container não encontrado"); return; }
+            var box = act.findViewById(idBox);
+            if (box === null) { log("container não está inflado"); return; }
+
+            var tv = box.findViewWithTag(Str.$new(WIDGET_TAG));
+            if (tv === null) {
+                tv = TextView.$new.overload("android.content.Context").call(TextView, act);
+                tv.setTag.overload("java.lang.Object").call(tv, Str.$new(WIDGET_TAG));
+                tv.setTextColor(-1);                       // branco
+                tv.setTextSize.overload("float").call(tv, 30.0);
+                box.removeAllViews();
+                box.addView(tv);
+                log("widget criado no container");
+            }
+            tv.setText.overload("java.lang.CharSequence").call(tv, Str.$new(widgetText()));
+
+            if (idTitle !== 0) {
+                var title = act.findViewById(idTitle);
+                if (title !== null) {
+                    title.setText.overload("java.lang.CharSequence")
+                        .call(title, Str.$new("Veículo"));
+                }
+            }
+        } catch (e) { log("paintWidget err: " + e); }
+    }
+
+    /** Atualiza o texto do widget sem reconstruir nada (sem cache de view). */
+    function tickWidget() {
+        var act = null;
+        try {
+            Java.choose(ACT, {
+                onMatch: function (inst) { act = inst; return "stop"; },
+                onComplete: function () {}
+            });
+        } catch (e) { return; }
+        if (act === null) return;
+        Java.scheduleOnMainThread(function () { paintWidget(act); });
+    }
+
     setInterval(function () {
         Java.perform(function () {
             var list = readCtrl();
             var raw = rawOf(list);
-            if (raw === lastRaw) return;
-            lastRaw = raw;
-            desired = list;
-            log("lista desejada = [" + raw + "]");
-            applyToInstances();
-            repaint();
+            if (raw !== lastRaw) {
+                lastRaw = raw;
+                desired = list;
+                log("lista desejada = [" + raw + "]");
+                applyToInstances();
+                repaint();
+            } else if (desired === WIDGET) {
+                tickWidget();   // só atualiza o valor
+            }
         });
     }, 1500);
 

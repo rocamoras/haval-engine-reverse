@@ -28,8 +28,11 @@ Java.perform(function () {
 
     // Estado desejado: {tmp, code, txt, min, max}. null = sem injeção.
     var desired = null;
-    // Referência viva da HiBoardView (capturada no hook ou via Java.choose).
-    var cachedView = null;
+    // NUNCA guardar wrapper de view entre ticks: `this` de dentro de um hook é
+    // uma referência JNI LOCAL, válida só durante aquela chamada. Reusar depois
+    // = "JNI DETECTED ERROR IN APPLICATION: use of invalid jobject" e o ART
+    // ABORTA o processo (SIGABRT) — try/catch em JS não segura isso. Foi o que
+    // derrubava a launcher. A view é procurada e usada no mesmo tick.
 
     function readCtrl() {
         try {
@@ -67,7 +70,6 @@ Java.perform(function () {
     // (3) sticky: sobrescreve o callback real com o nosso valor.
     try {
         HiBoardView.parseWeather.implementation = function (now) {
-            cachedView = this; // captura a view viva
             if (desired !== null && now !== null) {
                 try {
                     now.tmp.value      = desired.tmp;
@@ -84,9 +86,8 @@ Java.perform(function () {
         log("falha ao hookar parseWeather: " + e);
     }
 
-    // Acha a HiBoardView viva no heap (fallback quando o hook ainda não capturou).
+    // Acha a HiBoardView viva no heap, a cada tick (sem cache — ver acima).
     function findView() {
-        if (cachedView !== null) return cachedView;
         var found = null;
         try {
             Java.choose("com.beantechs.launcher.hiboard.HiBoardView", {
@@ -94,7 +95,6 @@ Java.perform(function () {
                 onComplete: function () {}
             });
         } catch (e) { log("choose err: " + e); }
-        if (found !== null) cachedView = found;
         return found;
     }
 
@@ -109,7 +109,7 @@ Java.perform(function () {
         try { w = build(desired); } catch (e) { log("build err: " + e); return; }
         Java.scheduleOnMainThread(function () {
             try { view.parseWeather(w); }
-            catch (e) { log("push err (view stale?): " + e); cachedView = null; }
+            catch (e) { log("push err: " + e); }
         });
         logState("pintado " + desired.tmp + "° (" + desired.txt + ")");
     }

@@ -420,3 +420,46 @@ O `online_music_container` é um `LinearLayout` que já é reconstruído por nó
 
 Ícone customizado exige bitmap: ou um PNG solto em `/data/local/tmp` via `BitmapFactory`, ou algo
 desenhado em runtime (`ShapeDrawable` + texto).
+
+## 12. Widget de temperatura no lugar da fileira (v2.23.0)
+
+Quinto estado do arquivo de controle: `widget`.
+
+- a fileira é esvaziada (`wantedList()` devolve `[]`), o bloco fica **visível** — esconder o
+  `HorizontalScrollView` esconderia o widget junto — e um `TextView` nosso entra no
+  `online_music_container`, identificado por `setTag("mc-cp-widget")` (nada de guardar wrapper
+  de view entre ticks);
+- o título `id/online_music` é repurposado para "Veículo" via `setText`;
+- valor a cada ~1,5s por `PlatformAdapterClient.getInstance().getData(k)` — o mesmo caminho que
+  a barra de status usa, e a classe existe também no APK da MediaCenter.
+
+Chaves: a externa é `car.basic.outside_temp` (confirmada, é a que a barra usa). A **interna não é
+conhecida** — o script sonda `car.basic.inside_temp`, `car.hvac.inside_temp`,
+`car.hvac.in_car_temp`, `car.basic.in_car_temp`, `car.hvac.temperature`, usa a primeira com valor
+plausível (-50..90) e loga qual respondeu (uma vez, não a cada tick). Se todas falharem, o painel
+mostra `--` e o log lista as tentativas.
+
+Estados finais do `/data/local/tmp/inject_media_cp`:
+
+| valor | efeito |
+|---|---|
+| ausente | fábrica |
+| `none` | título fica, fileira sem ícones |
+| `off` | título e fileira somem |
+| `widget` | fileira vira painel "Externa xx°C  Interna xx°C" |
+| `553,556,…` | fileira com esses CPs |
+
+## 13. Crash da launcher pelo hook de clima (corrigido)
+
+O `com_beantechs_launcher_weather.js` fazia `cachedView = this` dentro do hook de
+`HiBoardView.parseWeather` e reusava essa referência no tick seguinte. O `this` de um hook é uma
+referência JNI **local**, válida só durante aquela chamada — reusar depois dá
+`JNI DETECTED ERROR IN APPLICATION: use of invalid jobject` e o ART **aborta o processo**
+(SIGABRT), como apareceu em `docs/frida_diag_20260817_204753.txt`. `try/catch` em JS não segura
+abort do runtime.
+
+Corrigido: a view é procurada com `Java.choose` e usada no mesmo tick, sem cache.
+
+Nota: o `com_android_systemui.js` também guarda instâncias entre ticks, mas resultados de
+`Java.choose` são referências globais do bridge (é o `this` de hook que é local) — e o log mostra
+esse hook pintando por horas sem abortar. Ficou como está.

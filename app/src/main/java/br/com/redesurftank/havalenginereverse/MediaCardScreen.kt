@@ -142,6 +142,10 @@ fun MediaCardTab() {
                 selected.clear()
                 applyRaw("off", "bloco escondido")
             }
+            McButton("D · widget de temperatura no lugar da fileira", !busy, Color(0xFF0277BD)) {
+                selected.clear()
+                applyRaw("widget", "widget de temperatura")
+            }
             McButton("voltar ao padrão (só Deezer)", !busy, Color(0xFF37474F)) {
                 selected.clear(); selected.add(551)
                 apply(listOf(551), "só Deezer")
@@ -149,6 +153,12 @@ fun MediaCardTab() {
             Text(
                 "A aplicação é instantânea: o hook repinta a fileira em ~1,5s, sem reiniciar " +
                     "o app de mídia. Se a tela de mídia estiver fechada, vale no próximo abrir.",
+                color = Color(0xFF546E7A), fontSize = 10.sp
+            )
+            Text(
+                "No D, a externa sai de car.basic.outside_temp (mesma fonte da barra de " +
+                    "status). A chave da interna não é conhecida: o script sonda candidatas " +
+                    "e o log diz qual respondeu — se vier \"--\", me manda esse log.",
                 color = Color(0xFF546E7A), fontSize = 10.sp
             )
         }
