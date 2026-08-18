@@ -463,3 +463,34 @@ Corrigido: a view é procurada com `Java.choose` e usada no mesmo tick, sem cach
 Nota: o `com_android_systemui.js` também guarda instâncias entre ticks, mas resultados de
 `Java.choose` são referências globais do bridge (é o `this` de hook que é local) — e o log mostra
 esse hook pintando por horas sem abortar. Ficou como está.
+
+## 14. `TypeError: not a function` — métodos herdados no wrapper (v2.23.1)
+
+O log de 2026-08-18 (`docs/frida_diag_20260818_072241.txt`) mostrou o widget e o `off` falhando
+igual, a cada tick:
+
+```
+[mc-cp] setBlockVisible(online_music) err: TypeError: not a function
+[mc-cp] paintWidget err: TypeError: not a function
+```
+
+Causa: o wrapper de uma instância obtida por `Java.choose(MediaCenterActivity)` expõe os métodos
+**da própria classe** — `loadOnlineMusicCard()` sempre funcionou — mas não os **herdados**.
+`getResources()` (de `ContextWrapper`) e `findViewById()` (de `Activity`) não existem nesse
+wrapper, daí `not a function`. Note que o `setBlockVisible` já falhava na v2.22.0: o log dizia
+"bloco escondido" porque a mensagem vinha depois do `forEach`, sem checar erro — o `off` também
+nunca funcionou de verdade, só parecia.
+
+Correção — nada de método herdado por lookup:
+
+- ids por **campo estático** de `com.beantechs.mediacenter.mainmodel1xos.R$id`
+  (`online_music` = `0x7F0A01BA`, `horizontalScrollView` = `0x7F0A0107`,
+  `online_music_container` = `0x7F0A01BB`), com fallback nos valores fixos do `resources.arsc`;
+- `Java.cast(act, android.app.Activity).findViewById(id)`;
+- `Java.cast(v, android.view.View).setVisibility(...)` / `.setTag(...)` / `.findViewWithTag(...)`;
+- `Java.cast(box, android.view.ViewGroup).removeAllViews()` / `.addView(...)`;
+- `Java.cast(tv, android.widget.TextView).setText(...)`, cada chamada com `.overload(...)`
+  explícito.
+
+Erros do widget agora passam por `logOnce` (antes eram ~250 linhas idênticas no diag) e carregam
+`e.stack`, para a próxima falha apontar a linha.

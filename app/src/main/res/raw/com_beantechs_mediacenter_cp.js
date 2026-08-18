@@ -34,6 +34,13 @@ Java.perform(function () {
     var FileReader = Java.use("java.io.FileReader");
     var BufReader  = Java.use("java.io.BufferedReader");
     var Integer    = Java.use("java.lang.Integer");
+    // Wrappers das classes onde os métodos são DECLARADOS. O wrapper de uma
+    // instância achada por Java.choose expõe os métodos da própria classe
+    // (loadOnlineMusicCard funciona), mas não os herdados — getResources() e
+    // findViewById() davam "TypeError: not a function". Java.cast resolve.
+    var ActivityCls  = Java.use("android.app.Activity");
+    var ViewCls      = Java.use("android.view.View");
+    var ViewGroupCls = Java.use("android.view.ViewGroup");
     var IMPL_CLS   = "com.beantechs.mediacenter.core_onlineosmodel.OnlineOsModelImpl";
 
     /**
@@ -116,6 +123,41 @@ Java.perform(function () {
     }
 
     /**
+     * Id de recurso lido da classe R$id — acesso a CAMPO estático, sem lookup
+     * de método (imune ao problema acima). Fallback com os valores extraídos do
+     * resources.arsc deste APK, caso a classe R$id não esteja carregada.
+     */
+    var RID = null;
+    try {
+        RID = Java.use("com.beantechs.mediacenter.mainmodel1xos.R$id");
+    } catch (e) {
+        log("R$id indisponível, usando ids fixos: " + e);
+    }
+    var RID_FIXO = {
+        online_music: 0x7f0a01ba,
+        horizontalScrollView: 0x7f0a0107,
+        online_music_container: 0x7f0a01bb
+    };
+    function resId(name) {
+        try {
+            if (RID !== null && RID[name] !== undefined) return RID[name].value;
+        } catch (e) { /* cai no fixo */ }
+        return RID_FIXO[name];
+    }
+
+    /** findViewById via cast p/ android.app.Activity, onde ele é declarado. */
+    function viewOf(act, name) {
+        var id = resId(name);
+        if (!id) { log("id " + name + " desconhecido"); return null; }
+        try {
+            return Java.cast(act, ActivityCls).findViewById(id);
+        } catch (e) {
+            log("findViewById(" + name + ") err: " + e);
+            return null;
+        }
+    }
+
+    /**
      * Título e fileira são views do layout activity_media_center; some com as
      * duas para "desabilitar o menu". Como o ConstraintLayout ancora tudo no
      * topo do pai (margens fixas, sem encadeamento), o resto NÃO sobe — sobra
@@ -125,25 +167,15 @@ Java.perform(function () {
         var vis = visible ? 0 : 8;   // VISIBLE : GONE
         ["online_music", "horizontalScrollView"].forEach(function (n) {
             try {
-                var id = act.getResources()
-                    .getIdentifier(n, "id", "com.beantechs.mediacenter");
-                if (id === 0) { log("id " + n + " não encontrado"); return; }
-                var v = act.findViewById(id);
+                var v = viewOf(act, n);
                 if (v === null) { log("view " + n + " não está inflada"); return; }
-                v.setVisibility(vis);
-            } catch (e) { log("setBlockVisible(" + n + ") err: " + e); }
+                Java.cast(v, ViewCls).setVisibility(vis);
+            } catch (e) {
+                log("setBlockVisible(" + n + ") err: " + e +
+                    (e.stack ? " | " + e.stack : ""));
+            }
         });
         log("bloco de mídia online " + (visible ? "visível" : "escondido"));
-    }
-
-    // Um Integer[] pro Frida é um array JS de wrappers Integer — é assim que o
-    // bridge marshala tanto em argumento quanto em retorno. (Tentar montar via
-    // java.lang.reflect.Array devolve um wrapper de Object que o marshaller de
-    // retorno não aceita — foi o erro da v2.21.x.)
-    function buildArr(list) {
-        var out = [];
-        for (var i = 0; i < list.length; i++) out.push(Integer.valueOf(list[i]));
-        return out;
     }
 
     // (2) a lista que a tela e o serviço enxergam. Hooka os QUATRO níveis da
@@ -444,36 +476,48 @@ Java.perform(function () {
                "      Interna " + fmtTemp(probeTemp(PROBE_IN, "interna"));
     }
 
-    /** Cria (ou só atualiza) o TextView do widget. Roda na main thread. */
+    /**
+     * Cria (ou só atualiza) o TextView do widget. Roda na main thread.
+     * Todo método é chamado na classe que o declara (via Java.cast), senão o
+     * wrapper da Activity/View não o encontra.
+     */
     function paintWidget(act) {
         try {
-            var res = act.getResources();
-            var idBox = res.getIdentifier("online_music_container", "id", PKG);
-            var idTitle = res.getIdentifier("online_music", "id", PKG);
-            if (idBox === 0) { log("online_music_container não encontrado"); return; }
-            var box = act.findViewById(idBox);
-            if (box === null) { log("container não está inflado"); return; }
-
-            var tv = box.findViewWithTag(Str.$new(WIDGET_TAG));
-            if (tv === null) {
+            var boxRaw = viewOf(act, "online_music_container");
+            if (boxRaw === null) { log("container não está inflado"); return; }
+            var tagStr = Str.$new(WIDGET_TAG);
+            var found = Java.cast(boxRaw, ViewCls)
+                .findViewWithTag.overload("java.lang.Object").call(
+                    Java.cast(boxRaw, ViewCls), tagStr);
+            var tv;
+            if (found === null) {
                 tv = TextView.$new.overload("android.content.Context").call(TextView, act);
-                tv.setTag.overload("java.lang.Object").call(tv, Str.$new(WIDGET_TAG));
-                tv.setTextColor(-1);                       // branco
+                Java.cast(tv, ViewCls).setTag.overload("java.lang.Object")
+                    .call(Java.cast(tv, ViewCls), tagStr);
+                tv.setTextColor.overload("int").call(tv, -1);          // branco
                 tv.setTextSize.overload("float").call(tv, 30.0);
+                var box = Java.cast(boxRaw, ViewGroupCls);
                 box.removeAllViews();
-                box.addView(tv);
+                box.addView.overload("android.view.View")
+                    .call(box, Java.cast(tv, ViewCls));
                 log("widget criado no container");
+            } else {
+                tv = Java.cast(found, TextView);
             }
-            tv.setText.overload("java.lang.CharSequence").call(tv, Str.$new(widgetText()));
+            tv.setText.overload("java.lang.CharSequence")
+                .call(tv, Str.$new(widgetText()));
 
-            if (idTitle !== 0) {
-                var title = act.findViewById(idTitle);
-                if (title !== null) {
-                    title.setText.overload("java.lang.CharSequence")
-                        .call(title, Str.$new("Veículo"));
-                }
+            var titleRaw = viewOf(act, "online_music");
+            if (titleRaw !== null) {
+                var title = Java.cast(titleRaw, TextView);
+                title.setText.overload("java.lang.CharSequence")
+                    .call(title, Str.$new("Veículo"));
             }
-        } catch (e) { log("paintWidget err: " + e); }
+        } catch (e) {
+            // logOnce: um erro por mensagem, senão inunda o log a cada tick.
+            logOnce("paint:" + e,
+                "paintWidget err: " + e + (e.stack ? " | " + e.stack : ""));
+        }
     }
 
     /** Atualiza o texto do widget sem reconstruir nada (sem cache de view). */
