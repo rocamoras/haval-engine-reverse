@@ -295,6 +295,51 @@ public class FridaUtils {
         }
     }
 
+    // ── Aviso de vídeo em movimento (bean_video_limit_mode) ───────────────────
+    //
+    // CarAdapterManager.handleCheckVideoSecurityWarningState() decide a flag
+    // Settings.System.bean_video_security_warning a partir deste modo:
+    //   -1 = aviso nunca liga (estado fixo 0, ignora velocidade)
+    //    0 = aviso com qualquer velocidade > 0   (padrão desta central)
+    //    1 = aviso a partir de 15 km/h, libera abaixo de 12 (histerese)
+    // O h5.ui (ContentShellActivity.isVehicleMoving) só LÊ a flag derivada, e o
+    // player de vídeo USB da mídia usa o mesmo modo — um setting cobre as duas
+    // telas. Vale na hora: há ContentObserver em
+    // content://settings/system/bean_video_limit_mode.
+    // Escrever bean_video_security_warning direto não adianta: o
+    // CarAdapterManager reescreve no próximo update de velocidade.
+    public static final String VIDEO_LIMIT_MODE_KEY = "bean_video_limit_mode";
+
+    /** Valor atual do modo, ou "" se não conseguiu ler / não existe. */
+    public static String readVideoLimitMode() {
+        String out = sh("settings get system " + VIDEO_LIMIT_MODE_KEY).trim();
+        if (out.isEmpty() || "null".equalsIgnoreCase(out)) return "";
+        return out;
+    }
+
+    /** Grava o modo e confirma lendo de volta. */
+    public static String writeVideoLimitMode(int mode) {
+        if (!Shizuku.pingBinder()) return "Shizuku indisponível";
+        try {
+            ShizukuUtils.runCommandAndGetOutput(new String[]{
+                    "settings", "put", "system", VIDEO_LIMIT_MODE_KEY, String.valueOf(mode)});
+            String back = readVideoLimitMode();
+            String label;
+            switch (mode) {
+                case -1: label = "aviso desligado (qualquer velocidade)"; break;
+                case 0:  label = "aviso com qualquer movimento"; break;
+                case 1:  label = "aviso a partir de 15 km/h (libera abaixo de 12)"; break;
+                default: label = "modo " + mode;
+            }
+            if (!String.valueOf(mode).equals(back)) {
+                return "Escrevi " + mode + " mas leitura devolveu \"" + back + "\" — sem permissão?";
+            }
+            return "Modo " + mode + ": " + label;
+        } catch (Exception e) {
+            return "Erro ao gravar modo: " + e.getMessage();
+        }
+    }
+
     /** Conteúdo atual do arquivo de controle (vazio = sem override). */
     public static String readMediaCp() {
         String out = sh("cat " + MEDIA_CP_CTRL_PATH + " 2>/dev/null").trim();

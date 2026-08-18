@@ -494,3 +494,42 @@ Correção — nada de método herdado por lookup:
 
 Erros do widget agora passam por `logOnce` (antes eram ~250 linhas idênticas no diag) e carregam
 `e.stack`, para a próxima falha apontar a linha.
+
+## 15. Aviso "não assista a vídeos" — é configuração, não patch (v2.24.0)
+
+A mensagem `> 0 km/h, por favor, não assista a vídeos` vem do content shell do h5.ui
+(`string/drive_distraction_guide`; a da MediaCenter é outra, `play_waring_desc`, com `%d km/h`).
+
+`ContentShellActivity.isVehicleMoving()` **não lê velocidade** — lê uma flag:
+
+```java
+if (BuildConfig.ENABLE_DRIVER_DESTRACTION_GUIDE) {
+    moving = Settings.System.getInt(cr, "bean_video_security_warning", 0) == 1;
+}
+```
+
+Quem escreve essa flag é `CarAdapterManager.handleCheckVideoSecurityWarningState()` (processo da
+MediaCenter), a partir de `mCurSpeed` e de `Settings.System.bean_video_limit_mode`:
+
+| `bean_video_limit_mode` | branch | efeito |
+|---|---|---|
+| `-1` | `if-eq → move v1, 0` | flag fixa em 0 — aviso **nunca** liga |
+| `0` | compara `mCurSpeed > 0` | aviso com **qualquer** movimento (o desta central) |
+| `1` | `0x41700000`=15.0 / `0x41400000`=12.0 | liga em **15 km/h**, libera abaixo de **12** (histerese) |
+| outro | mantém `mVideoSecurityWarningState` | sem mudança |
+
+`Utils.getCarWarningSpeed()` confirma: modo 1 → 15, qualquer outro → 0. O mesmo modo governa o
+`SpeedWarnDialog` do player de vídeo USB, então **um setting cobre as duas telas**.
+
+Aplicação é ao vivo — `CarAdapterManager.registerContentObserver()` observa
+`content://settings/system/bean_video_limit_mode`:
+
+```bash
+adb shell settings put system bean_video_limit_mode 1
+```
+
+Escrever `bean_video_security_warning` direto não resolve: o `CarAdapterManager` reescreve no
+próximo update de velocidade.
+
+Na aba Mídia há um seletor de três estados que grava via Shizuku, relê para confirmar e mostra o
+modo atual.

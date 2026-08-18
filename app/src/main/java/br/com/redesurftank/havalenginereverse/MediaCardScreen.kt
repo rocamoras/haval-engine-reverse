@@ -66,6 +66,7 @@ fun MediaCardTab() {
     var hooked by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var current by remember { mutableStateOf("") }
+    var limitMode by remember { mutableStateOf("") }
     val log = remember { mutableStateListOf<String>() }
 
     fun stamp() = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
@@ -106,8 +107,21 @@ fun MediaCardTab() {
 
     fun apply(ids: List<Int>, what: String) = applyRaw(ids.joinToString(","), what)
 
+    /** Grava bean_video_limit_mode e relê para confirmar. */
+    fun setLimitMode(mode: Int, what: String) {
+        if (busy) return
+        busy = true; addLog("aviso de vídeo: $what…")
+        scope.launch {
+            val res = withContext(Dispatchers.IO) { FridaUtils.writeVideoLimitMode(mode) }
+            addLog(res)
+            limitMode = withContext(Dispatchers.IO) { FridaUtils.readVideoLimitMode() }
+            busy = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         current = withContext(Dispatchers.IO) { FridaUtils.readMediaCp() }
+        limitMode = withContext(Dispatchers.IO) { FridaUtils.readVideoLimitMode() }
     }
 
     Column(
@@ -198,6 +212,45 @@ fun MediaCardTab() {
             McButton("aplicar seleção", !busy, Color(0xFF6A1B9A)) {
                 apply(selected.toList(), "[" + selected.joinToString(",") + "]")
             }
+        }
+
+        // ── Card: aviso de vídeo em movimento ────────────────────────────
+        McCard {
+            Text("Aviso de vídeo em movimento", color = Color(0xFF80CBC4), fontSize = 12.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                "\"A velocidade do veículo > 0 km/h, por favor, não assista a vídeos.\" " +
+                    "Não é patch: é o modo do próprio OEM em " +
+                    "Settings.System.bean_video_limit_mode, lido ao vivo por ContentObserver. " +
+                    "Vale para o content shell (PWAs) e para o player de vídeo USB.",
+                color = Color(0xFF90A4AE), fontSize = 10.sp
+            )
+            Text(
+                "modo atual: " + when (limitMode) {
+                    "-1" -> "-1 · aviso desligado"
+                    "0" -> "0 · qualquer movimento (padrão)"
+                    "1" -> "1 · a partir de 15 km/h"
+                    "" -> "(não lido — Shizuku ativo?)"
+                    else -> limitMode
+                },
+                color = Color(0xFFB0BEC5), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+            )
+            McButton("1 · avisar só a partir de 15 km/h (recomendado)", !busy, Color(0xFF2E7D32)) {
+                setLimitMode(1, "a partir de 15 km/h")
+            }
+            McButton("0 · avisar com qualquer movimento (fábrica)", !busy, Color(0xFF37474F)) {
+                setLimitMode(0, "qualquer movimento")
+            }
+            McButton("-1 · desligar o aviso em qualquer velocidade", !busy, Color(0xFFB71C1C)) {
+                setLimitMode(-1, "desligado")
+            }
+            Text(
+                "O modo 1 tem histerese: liga o aviso em 15 km/h e libera abaixo de 12 — resolve " +
+                    "parado no trânsito e manobra, mantendo o bloqueio em movimento. O -1 libera " +
+                    "vídeo na tela do motorista a qualquer velocidade; o risco e a exposição legal " +
+                    "são seus. Tudo reversível: é só um setting.",
+                color = Color(0xFF546E7A), fontSize = 10.sp
+            )
         }
 
         // ── Card: estado / manutenção ────────────────────────────────────
