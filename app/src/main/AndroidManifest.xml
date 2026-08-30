@@ -36,6 +36,21 @@
             </intent-filter>
         </activity>
 
+        <!--
+            Barra lateral que fica ao lado do Android Auto. resizeableActivity
+            explícito porque ela é colocada em freeform/split por shell, e
+            configChanges pra não recriar a cada resize da janela.
+        -->
+        <activity
+            android:name=".SidebarActivity"
+            android:exported="true"
+            android:label="Ações"
+            android:resizeableActivity="true"
+            android:excludeFromRecents="true"
+            android:screenOrientation="unspecified"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|density"
+            android:theme="@style/Theme.HavalEngineReverse" />
+
         <service
             android:name=".services.UniversalMonitorService"
             android:directBootAware="true"

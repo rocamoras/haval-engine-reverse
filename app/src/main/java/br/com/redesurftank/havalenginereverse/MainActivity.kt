@@ -405,6 +405,17 @@ fun DiscoveryScreen() {
                     )
                 }
             )
+            Tab(
+                selected = selectedTab == 9,
+                onClick = { selectedTab = 9 },
+                text = {
+                    Text(
+                        "AA Split",
+                        color = if (selectedTab == 9) Color(0xFF4FC3F7) else Color(0xFF546E7A),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+            )
         }
 
         // ── Conteúdo ─────────────────────────────────────────────────────
@@ -418,6 +429,7 @@ fun DiscoveryScreen() {
             6 -> WeatherAidlTab()
             7 -> ApkPickerTab()
             8 -> MediaCardTab()
+            9 -> AaSplitTab()
         }
     }
 }
