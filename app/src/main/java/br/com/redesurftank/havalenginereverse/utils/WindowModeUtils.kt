@@ -141,6 +141,58 @@ object WindowModeUtils {
 
     fun stacks(): String = sh("am stack list")
 
+    /**
+     * Tudo que preciso ver quando uma das estratégias falha.
+     *
+     * O item que mais importa é o logcat do ActivityManager/ActivityTaskManager: é
+     * lá que sai o motivo de um resize ser recusado ("Activity is not resizeable",
+     * "Can not enter split-screen"), e não na saída do `am`, que devolve exit 0
+     * mesmo quando o WM ignora o pedido.
+     */
+    fun collectDiagnostics(component: String, tabLog: String): String = buildString {
+        val pkg = component.substringBefore("/")
+        appendLine("==== AA SPLIT DIAG ====")
+        appendLine("alvo: " + component.ifBlank { "(vazio)" })
+        appendLine(androidVersion())
+        appendLine("fingerprint: " + sh("getprop ro.build.fingerprint").trim())
+        appendLine(readFlags())
+        appendLine()
+        appendLine("== wm ==")
+        appendLine(sh("wm size"))
+        appendLine(sh("wm density"))
+        appendLine()
+        appendLine("== features de multi-window ==")
+        appendLine(sh("pm list features | grep -i -E \"freeform|multiwindow|picture|split\""))
+        appendLine()
+        appendLine("== am stack list ==")
+        appendLine(stacks())
+        appendLine()
+        appendLine("== stacks / tasks / bounds ==")
+        appendLine(
+            sh(
+                "dumpsys activity activities | grep -E " +
+                    "\"Stack #|TaskRecord|ActivityRecord|mResumedActivity|mFocusedActivity" +
+                    "|mBounds|WindowingMode|mResizeMode|supportsSplitScreen|isSleeping\""
+            )
+        )
+        appendLine()
+        appendLine("== resizeMode declarado pelo alvo ==")
+        if (pkg.isNotBlank()) {
+            appendLine(
+                sh(
+                    "dumpsys package " + pkg +
+                        " | grep -i -E \"resizeMode|resizeable|versionName|targetSdk|flags=\""
+                )
+            )
+        }
+        appendLine()
+        appendLine("== logcat AM/WM (400) ==")
+        appendLine(sh("logcat -d -t 400 -s ActivityManager:V ActivityTaskManager:V WindowManager:V"))
+        appendLine()
+        appendLine("== log da aba ==")
+        appendLine(tabLog)
+    }
+
     // ── Aplicação ───────────────────────────────────────────────────────────
 
     /**

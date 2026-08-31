@@ -76,6 +76,8 @@ fun AaSplitTab() {
     var candidates by remember { mutableStateOf<List<String>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var confirmReboot by remember { mutableStateOf(false) }
+    var fbBusy by remember { mutableStateOf(false) }
+    var fbMsg by remember { mutableStateOf("") }
     val log = remember { mutableStateListOf<String>() }
 
     fun stamp() = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
@@ -313,6 +315,56 @@ fun AaSplitTab() {
                 val c = customCmd.trim()
                 if (c.isEmpty()) addLog("comando vazio")
                 else run("\$ $c") { WindowModeUtils.sh(c) }
+            }
+        }
+
+        // ── 6. Diagnóstico → Firebase ────────────────────────────────────
+        SplitCard("6 · Diagnóstico → Firebase") {
+            Text(
+                "Coleta o estado real do WindowManager (stacks, bounds, resizeMode do alvo, " +
+                    "features de multi-window) + o logcat do ActivityManager — é lá que sai o " +
+                    "motivo de um resize ser recusado, porque o `am` devolve sucesso mesmo " +
+                    "quando o WM ignora o pedido. Junta o log desta aba e envia.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+            SplitButton(
+                if (fbBusy) "enviando…" else "enviar diagnóstico pro Firebase",
+                fbBusy,
+                accent = Color(0xFF00695C)
+            ) {
+                fbBusy = true
+                fbMsg = "coletando…"
+                scope.launch {
+                    val target = component.trim()
+                    val tabLog = log.joinToString("\n")
+                    val diag = withContext(Dispatchers.IO) {
+                        WindowModeUtils.collectDiagnostics(target, tabLog)
+                    }
+                    val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    val name = "aasplit_diag_$ts.txt"
+                    val f = java.io.File(context.cacheDir, name)
+                    withContext(Dispatchers.IO) { f.writeText(diag) }
+                    fbMsg = "enviando ${f.length() / 1024} KB…"
+                    // uploadFile usa Looper internamente — tem que ser na main thread.
+                    FirebaseLogUploader.uploadFile(
+                        file = f, destName = name,
+                        onProgress = { fbMsg = it },
+                        onSuccess = { url ->
+                            fbMsg = "✓ $url"
+                            val cb = context
+                                .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cb.setPrimaryClip(ClipData.newPlainText("firebase-log", url))
+                            fbBusy = false
+                        },
+                        onError = { fbMsg = "erro: $it"; fbBusy = false }
+                    )
+                }
+            }
+            if (fbMsg.isNotBlank()) {
+                Text(
+                    fbMsg, color = Color(0xFF4FC3F7), fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
             }
         }
 
