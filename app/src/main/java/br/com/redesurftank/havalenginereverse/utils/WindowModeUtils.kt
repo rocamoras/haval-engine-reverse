@@ -49,6 +49,26 @@ object WindowModeUtils {
 
     data class ScreenSize(val width: Int, val height: Int)
 
+    /**
+     * Área realmente utilizável. Não é a tela: nesta central mBounds é
+     * 0,0-1792,720 e mAppBounds é 128,0-1920,720 — existe uma barra permanente de
+     * 128px na esquerda. Posicionar em x=0 joga a barra debaixo dela.
+     */
+    data class Area(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+        val width get() = right - left
+        val height get() = bottom - top
+        override fun toString() = "$left,$top-$right,$bottom (${width}x$height)"
+    }
+
+    data class TaskInfo(
+        val taskId: Int,
+        val stackId: Int,
+        val component: String,
+        val visible: Boolean
+    ) {
+        val pkg get() = component.substringBefore("/")
+    }
+
     fun shizukuReady(): Boolean = try { Shizuku.pingBinder() } catch (t: Throwable) { false }
 
     /**
@@ -142,6 +162,101 @@ object WindowModeUtils {
     fun stacks(): String = sh("am stack list")
 
     /**
+     * Área utilizável, lida do mAppBounds do primeiro stack. Cai pro tamanho da
+     * tela se o dump não trouxer mAppBounds.
+     */
+    fun usableArea(): Area? {
+        val m = Regex("""mAppBounds=Rect\((\d+), (\d+) - (\d+), (\d+)\)""").find(stacks())
+        if (m != null) {
+            return Area(
+                m.groupValues[1].toInt(), m.groupValues[2].toInt(),
+                m.groupValues[3].toInt(), m.groupValues[4].toInt()
+            )
+        }
+        val s = screenSize() ?: return null
+        return Area(0, 0, s.width, s.height)
+    }
+
+    /**
+     * Todas as tasks abertas, com stack e visibilidade.
+     *
+     * É o jeito confiável de achar a task do Android Auto: ao contrário do
+     * "activity no topo", uma task continua listada depois que você sai dela
+     * (visible=false), então dá pra abrir o AA, voltar pro nosso app e escolher.
+     */
+    fun listTasks(): List<TaskInfo> {
+        val out = stacks()
+        val result = mutableListOf<TaskInfo>()
+        var stackId = -1
+        out.lines().forEach { line ->
+            Regex("""^Stack id=(\d+)""").find(line.trim())?.let {
+                stackId = it.groupValues[1].toInt()
+            }
+            val t = Regex("""taskId=(\d+): (\S+)""").find(line) ?: return@forEach
+            val visible = Regex("""visible=(\w+)""").find(line)?.groupValues?.get(1) == "true"
+            result.add(TaskInfo(t.groupValues[1].toInt(), stackId, t.groupValues[2], visible))
+        }
+        return result
+    }
+
+    /**
+     * O modo que a stack tem DE VERDADE. No `am stack list` o mWindowingMode vem
+     * na linha de configuration, logo abaixo do "Stack id=N".
+     */
+    fun stackWindowingMode(dump: String, stackId: Int): String {
+        val lines = dump.lines()
+        val i = lines.indexOfFirst { it.trim().startsWith("Stack id=$stackId ") }
+        if (i < 0) return "?"
+        for (j in i until minOf(i + 3, lines.size)) {
+            Regex("""mWindowingMode=(\w+)""").find(lines[j])?.let { return it.groupValues[1] }
+        }
+        return "?"
+    }
+
+    /**
+     * Descobre empiricamente o que o WindowManager desta central concede, usando a
+     * nossa própria barra como cobaia — nada de mexer no AA antes de saber.
+     *
+     * O `am start --windowingMode N` devolve exit 0 sempre; quando o modo não é
+     * suportado o WM rebaixa a stack pra fullscreen em silêncio. Então o teste é:
+     * pedir o modo, reler o `am stack list` e ver o que a stack virou de verdade.
+     */
+    fun probeMultiWindow(): String {
+        val s = Steps()
+        s.say("== suporte declarado ==")
+        s.exec("pm list features | grep -i -E \"freeform|multiwindow|picture|split\"")
+        s.exec("dumpsys activity settings | grep -i -E \"resizable|freeform|multiwindow|split\"")
+        s.say("(flags: " + readFlags() + ")")
+        s.say("")
+
+        listOf(
+            MODE_FREEFORM to "freeform",
+            MODE_SPLIT_PRIMARY to "split-primary"
+        ).forEach { (mode, name) ->
+            s.say("== probe $name (modo $mode) ==")
+            s.exec("am force-stop $SIDEBAR_PKG")
+            s.exec("am start --activity-new-task --windowingMode $mode -n $SIDEBAR_COMPONENT")
+            val dump = stacks()
+            val task = listTasks().firstOrNull { it.pkg == SIDEBAR_PKG }
+            if (task == null) {
+                s.say("!! a barra não abriu — nada a concluir sobre $name")
+            } else {
+                val effective = stackWindowingMode(dump, task.stackId)
+                s.say("barra na task ${task.taskId}, stack ${task.stackId}")
+                s.say(
+                    if (effective.startsWith(name.substringBefore("-")))
+                        ">> $name CONCEDIDO (mWindowingMode=$effective)"
+                    else
+                        ">> $name NEGADO — o WM entregou \"$effective\""
+                )
+            }
+            s.say("")
+        }
+        s.exec("am force-stop $SIDEBAR_PKG")
+        return s.toString()
+    }
+
+    /**
      * Tudo que preciso ver quando uma das estratégias falha.
      *
      * O item que mais importa é o logcat do ActivityManager/ActivityTaskManager: é
@@ -161,8 +276,18 @@ object WindowModeUtils {
         appendLine(sh("wm size"))
         appendLine(sh("wm density"))
         appendLine()
+        appendLine("== area utilizavel ==")
+        appendLine("usableArea = " + (usableArea()?.toString() ?: "?"))
+        appendLine()
         appendLine("== features de multi-window ==")
         appendLine(sh("pm list features | grep -i -E \"freeform|multiwindow|picture|split\""))
+        appendLine()
+        appendLine("== suporte efetivo (dumpsys activity settings) ==")
+        appendLine(sh("dumpsys activity settings | grep -i -E \"resizable|freeform|multiwindow|split\""))
+        appendLine(sh("dumpsys window | grep -i -E \"mSupports|freeform|multiwindow\""))
+        appendLine()
+        appendLine("== config de multi-window do overlay ==")
+        appendLine(sh("getprop | grep -i -E \"freeform|multiwindow|multi_window\""))
         appendLine()
         appendLine("== am stack list ==")
         appendLine(stacks())
@@ -201,9 +326,16 @@ object WindowModeUtils {
      * @param component pkg/activity do receiver de AA
      * @param sidebarPx largura da barra em pixels
      */
-    fun applyFreeform(component: String, sidebarPx: Int, screen: ScreenSize): String {
+    fun applyFreeform(component: String, sidebarPx: Int, area: Area): String {
         val s = Steps()
         val pkg = component.substringBefore("/")
+        if (pkg == SIDEBAR_PKG) {
+            s.say("!! o alvo é o nosso próprio app — escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
+
+        val split = area.left + sidebarPx
+        s.say("área utilizável: $area → barra ${area.left}..$split, AA $split..${area.right}")
 
         if (component.contains("/")) {
             s.exec("am start --windowingMode $MODE_FREEFORM -n $component", "AA relançado em freeform")
@@ -218,37 +350,66 @@ object WindowModeUtils {
 
         // Sem isto o resize é ignorado quando o receiver declara resizeableActivity=false.
         s.exec("am task resizeable $aaTask 2", "task marcada como redimensionável")
-        s.exec(
-            "am task resize $aaTask $sidebarPx 0 ${screen.width} ${screen.height}",
-            "AA na faixa direita"
-        )
+        s.exec("am task resize $aaTask $split ${area.top} ${area.right} ${area.bottom}", "AA na direita")
+        s.say("modo efetivo do AA: " + modeOfPkg(pkg))
 
-        s.exec("am start --windowingMode $MODE_FREEFORM -n $SIDEBAR_COMPONENT", "barra no ar")
-        val barTask = taskIdOf(SIDEBAR_PKG)
+        // --activity-new-task é obrigatório: sem ele a barra entra na MESMA task do
+        // MainActivity (mesma taskAffinity) e não pode ser posicionada sozinha.
+        s.exec(
+            "am start --activity-new-task --windowingMode $MODE_FREEFORM -n $SIDEBAR_COMPONENT",
+            "barra no ar"
+        )
+        val barTask = listTasks().firstOrNull { it.component.contains("SidebarActivity") }
         if (barTask == null) {
             s.say("!! não achei a task da barra")
         } else {
-            s.say("task da barra = $barTask")
-            s.exec("am task resize $barTask 0 0 $sidebarPx ${screen.height}", "barra na esquerda")
+            s.say("task da barra = ${barTask.taskId} (stack ${barTask.stackId})")
+            s.exec(
+                "am task resize ${barTask.taskId} ${area.left} ${area.top} $split ${area.bottom}",
+                "barra na esquerda"
+            )
         }
         return s.toString()
+    }
+
+    /** Modo efetivo da stack onde o pacote está — o que o WM concedeu de fato. */
+    fun modeOfPkg(pkg: String): String {
+        val dump = stacks()
+        val t = listTasks().firstOrNull { it.pkg == pkg } ?: return "?"
+        return stackWindowingMode(dump, t.stackId)
     }
 
     /**
      * Split clássico: a barra vira docked (primary), o AA vai pro secondary.
      * A ordem importa — o docked precisa existir antes do secondary.
      */
-    fun applySplit(component: String, sidebarPx: Int, screen: ScreenSize): String {
+    fun applySplit(component: String, sidebarPx: Int, area: Area): String {
         val s = Steps()
         val pkg = component.substringBefore("/")
+        if (pkg == SIDEBAR_PKG) {
+            s.say("!! o alvo é o nosso próprio app — escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
 
         taskIdOf(pkg)?.let { s.exec("am task resizeable $it 2", "task do AA redimensionável") }
 
-        s.exec("am start --windowingMode $MODE_SPLIT_PRIMARY -n $SIDEBAR_COMPONENT", "barra como docked")
-        s.exec("am stack resize-docked-stack 0 0 $sidebarPx ${screen.height}", "largura do docked")
+        s.exec(
+            "am start --activity-new-task --windowingMode $MODE_SPLIT_PRIMARY -n $SIDEBAR_COMPONENT",
+            "barra como docked"
+        )
+        val bar = listTasks().firstOrNull { it.component.contains("SidebarActivity") }
+        s.say(
+            "modo efetivo da barra: " +
+                (bar?.let { stackWindowingMode(stacks(), it.stackId) } ?: "?")
+        )
+        s.exec(
+            "am stack resize-docked-stack ${area.left} ${area.top} ${area.left + sidebarPx} ${area.bottom}",
+            "largura do docked"
+        )
 
         if (component.contains("/")) {
             s.exec("am start --windowingMode $MODE_SPLIT_SECONDARY -n $component", "AA ao lado")
+            s.say("modo efetivo do AA: " + modeOfPkg(pkg))
         }
         s.say("")
         s.say(stacks())
@@ -256,8 +417,12 @@ object WindowModeUtils {
     }
 
     /** Só redimensiona a task que já está aberta, sem relançar nada. */
-    fun resizeOnly(pkg: String, sidebarPx: Int, screen: ScreenSize): String {
+    fun resizeOnly(pkg: String, sidebarPx: Int, area: Area): String {
         val s = Steps()
+        if (pkg == SIDEBAR_PKG) {
+            s.say("!! o alvo é o nosso próprio app — escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
         val task = taskIdOf(pkg)
         if (task == null) {
             s.say("!! não achei a task de $pkg")
@@ -265,19 +430,35 @@ object WindowModeUtils {
         }
         s.say("task = $task")
         s.exec("am task resizeable $task 2")
-        s.exec("am task resize $task $sidebarPx 0 ${screen.width} ${screen.height}")
+        s.exec(
+            "am task resize $task ${area.left + sidebarPx} ${area.top} ${area.right} ${area.bottom}"
+        )
+        s.say("modo efetivo: " + modeOfPkg(pkg))
+        s.say("bounds agora: " + (listTasks().firstOrNull { it.pkg == pkg }?.let { boundsOfTask(it.taskId) } ?: "?"))
         return s.toString()
     }
 
-    /** Volta tudo pro fullscreen e derruba a barra. */
+    /** Bounds atuais de uma task, do `am stack list`. */
+    fun boundsOfTask(taskId: Int): String {
+        val line = stacks().lines().firstOrNull { it.contains("taskId=$taskId:") } ?: return "?"
+        return Regex("""bounds=(\S+)""").find(line)?.groupValues?.get(1) ?: "?"
+    }
+
+    /**
+     * Volta tudo pro fullscreen e derruba a barra.
+     *
+     * Não relança o nosso MainActivity: era isso que empilhava uma activity nova a
+     * cada tentativa (11 na primeira rodada) e zerava o log da aba junto.
+     */
     fun restore(component: String): String {
         val s = Steps()
         s.exec("am force-stop $SIDEBAR_PKG")
         val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG) return s.toString()
         val task = taskIdOf(pkg)
-        val screen = screenSize()
-        if (task != null && screen != null) {
-            s.exec("am task resize $task 0 0 ${screen.width} ${screen.height}")
+        val area = usableArea()
+        if (task != null && area != null) {
+            s.exec("am task resize $task ${area.left} ${area.top} ${area.right} ${area.bottom}")
         }
         if (component.contains("/")) {
             s.exec("am start --windowingMode $MODE_FULLSCREEN -n $component")

@@ -40,6 +40,11 @@
             Barra lateral que fica ao lado do Android Auto. resizeableActivity
             explícito porque ela é colocada em freeform/split por shell, e
             configChanges pra não recriar a cada resize da janela.
+
+            taskAffinity próprio + singleInstance são o que garante task separada:
+            com a affinity padrão do pacote ela entrava na MESMA task do
+            MainActivity, e uma task não pode ser posicionada em dois lugares —
+            era por isso que a barra nunca ia pra esquerda.
         -->
         <activity
             android:name=".SidebarActivity"
@@ -47,6 +52,8 @@
             android:label="Ações"
             android:resizeableActivity="true"
             android:excludeFromRecents="true"
+            android:taskAffinity="br.com.redesurftank.havalenginereverse.sidebar"
+            android:launchMode="singleInstance"
             android:screenOrientation="unspecified"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|density"
             android:theme="@style/Theme.HavalEngineReverse" />
