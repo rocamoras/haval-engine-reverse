@@ -345,7 +345,18 @@ fun AaSplitTab() {
                     run("Restaurando fullscreen") { WindowModeUtils.restore(component.trim()) }
                 }
             }
-            SplitButton("Ver stacks", busy) { run("am stack list") { WindowModeUtils.stacks() } }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitButton("D · Só a barra", busy, accent = Color(0xFF00695C)) {
+                    if (a == null || px == null) addLog("rode o Escanear antes")
+                    else run("Subindo só a barra") { WindowModeUtils.launchSidebar(px, a) }
+                }
+                SplitButton("Ver stacks", busy) { run("am stack list") { WindowModeUtils.stacks() } }
+            }
+            Text(
+                "D serve quando o AA já está na direita (a task lembra os bounds) e só a " +
+                    "barra falta — foi o caso de 01/09: o AA foi, a barra não subiu.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
         }
 
         // ── 5. Comando livre ─────────────────────────────────────────────

@@ -37,6 +37,13 @@ object WindowModeUtils {
     const val SIDEBAR_PKG = "br.com.redesurftank.havalenginereverse"
     const val SIDEBAR_COMPONENT = "$SIDEBAR_PKG/.SidebarActivity"
 
+    /**
+     * FLAG_ACTIVITY_NEW_TASK como o `am start` do Android 9 aceita. A forma longa
+     * `--activity-new-task` não existe nessa versão (Intent.parseCommandArgs lança
+     * "Unknown option") — foi isso que impediu a barra de subir na rodada de 01/09.
+     */
+    const val FLAG_NEW_TASK = "-f 0x10000000"
+
     /** Palavras que costumam aparecer no pacote de um receiver de projeção. */
     private val PROJECTION_HINTS = listOf(
         "auto", "link", "project", "gearhead", "carlife", "carplay",
@@ -235,7 +242,7 @@ object WindowModeUtils {
         ).forEach { (mode, name) ->
             s.say("== probe $name (modo $mode) ==")
             s.exec("am force-stop $SIDEBAR_PKG")
-            s.exec("am start --activity-new-task --windowingMode $mode -n $SIDEBAR_COMPONENT")
+            s.exec("am start $FLAG_NEW_TASK --windowingMode $mode -n $SIDEBAR_COMPONENT")
             val dump = stacks()
             val task = listTasks().firstOrNull { it.pkg == SIDEBAR_PKG }
             if (task == null) {
@@ -353,23 +360,42 @@ object WindowModeUtils {
         s.exec("am task resize $aaTask $split ${area.top} ${area.right} ${area.bottom}", "AA na direita")
         s.say("modo efetivo do AA: " + modeOfPkg(pkg))
 
-        // --activity-new-task é obrigatório: sem ele a barra entra na MESMA task do
-        // MainActivity (mesma taskAffinity) e não pode ser posicionada sozinha.
+        launchSidebarInto(s, area, split)
+        return s.toString()
+    }
+
+    /**
+     * Sobe só a barra, em freeform, na faixa esquerda — pra quando o AA já está
+     * posicionado (ele lembra os bounds da task) e só a barra sumiu.
+     */
+    fun launchSidebar(sidebarPx: Int, area: Area): String {
+        val s = Steps()
+        launchSidebarInto(s, area, area.left + sidebarPx)
+        return s.toString()
+    }
+
+    private fun launchSidebarInto(s: Steps, area: Area, split: Int) {
+        // NEW_TASK + singleInstance no manifesto: sem os dois a barra entra na MESMA
+        // task do MainActivity e não pode ser posicionada sozinha.
         s.exec(
-            "am start --activity-new-task --windowingMode $MODE_FREEFORM -n $SIDEBAR_COMPONENT",
+            "am start $FLAG_NEW_TASK --windowingMode $MODE_FREEFORM -n $SIDEBAR_COMPONENT",
             "barra no ar"
         )
         val barTask = listTasks().firstOrNull { it.component.contains("SidebarActivity") }
         if (barTask == null) {
             s.say("!! não achei a task da barra")
-        } else {
-            s.say("task da barra = ${barTask.taskId} (stack ${barTask.stackId})")
-            s.exec(
-                "am task resize ${barTask.taskId} ${area.left} ${area.top} $split ${area.bottom}",
-                "barra na esquerda"
-            )
+            return
         }
-        return s.toString()
+        s.say("task da barra = ${barTask.taskId} (stack ${barTask.stackId})")
+        s.exec("am task resizeable ${barTask.taskId} 2")
+        s.exec(
+            "am task resize ${barTask.taskId} ${area.left} ${area.top} $split ${area.bottom}",
+            "barra na esquerda"
+        )
+        s.say(
+            "barra: modo " + stackWindowingMode(stacks(), barTask.stackId) +
+                ", bounds " + boundsOfTask(barTask.taskId)
+        )
     }
 
     /** Modo efetivo da stack onde o pacote está — o que o WM concedeu de fato. */
@@ -394,7 +420,7 @@ object WindowModeUtils {
         taskIdOf(pkg)?.let { s.exec("am task resizeable $it 2", "task do AA redimensionável") }
 
         s.exec(
-            "am start --activity-new-task --windowingMode $MODE_SPLIT_PRIMARY -n $SIDEBAR_COMPONENT",
+            "am start $FLAG_NEW_TASK --windowingMode $MODE_SPLIT_PRIMARY -n $SIDEBAR_COMPONENT",
             "barra como docked"
         )
         val bar = listTasks().firstOrNull { it.component.contains("SidebarActivity") }
@@ -402,10 +428,10 @@ object WindowModeUtils {
             "modo efetivo da barra: " +
                 (bar?.let { stackWindowingMode(stacks(), it.stackId) } ?: "?")
         )
-        s.exec(
-            "am stack resize-docked-stack ${area.left} ${area.top} ${area.left + sidebarPx} ${area.bottom}",
-            "largura do docked"
-        )
+        // No Android 9 o comando exige DOIS retângulos: o do docked e o da task
+        // dentro dele. Com quatro números ele lança "Argument expected after".
+        val dock = "${area.left} ${area.top} ${area.left + sidebarPx} ${area.bottom}"
+        s.exec("am stack resize-docked-stack $dock $dock", "largura do docked")
 
         if (component.contains("/")) {
             s.exec("am start --windowingMode $MODE_SPLIT_SECONDARY -n $component", "AA ao lado")
