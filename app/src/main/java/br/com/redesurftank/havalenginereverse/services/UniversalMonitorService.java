@@ -112,11 +112,20 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
     /** Reaplica o valor periodicamente para sobreviver a sobrescritas do OEM. */
     private static final long   MIRROR_REAPPLY_INTERVAL_MS = 30_000L;
 
+    private static final String PREF_AA_WATCH_ENABLED = "aa_window_watch_enabled";
+    /**
+     * O AA volta pra fullscreen a cada reconexão do celular e depois de um HOME —
+     * são os dois eventos que desfazem a janela. 5s é o compromisso entre pegar
+     * isso rápido e não ficar gastando um processo de shell sem parar.
+     */
+    private static final long   AA_WATCH_INTERVAL_MS = 5_000L;
+
     // Fonte da verdade do espelhamento (estática p/ ser acessível a partir do StateHolder).
     private static volatile UniversalMonitorService sInstance;
     private static volatile boolean sMirrorActive = false;
     private static volatile String  sMirrorTargetKey = DEFAULT_MIRROR_TARGET_KEY;
     private volatile String lastOutsideTemp = null;
+    private static volatile boolean sAaWatchActive = false;
 
     // ── Overlay ───────────────────────────────────────────────────────────
     private static final String PREF_OVERLAY_ENABLED = "overlay_temp_enabled";
@@ -1071,6 +1080,10 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             if (p.getBoolean(PREF_OVERLAY_ENABLED, false)) {
                 backgroundHandler.post(this::enableOverlayInternal);
             }
+            sAaWatchActive = p.getBoolean(PREF_AA_WATCH_ENABLED, false);
+            if (sAaWatchActive) {
+                backgroundHandler.postDelayed(aaWatchRunnable, AA_WATCH_INTERVAL_MS);
+            }
         } catch (Exception e) {
             Log.w(TAG, "onCreate: prefs indisponíveis (boot bloqueado?), restauração adiada: " + e.getMessage());
         }
@@ -1209,6 +1222,60 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
             }
         });
     }
+
+    /**
+     * Mantém a janela do Android Auto no lugar.
+     *
+     * Sem isto a janela dura até a próxima reconexão do celular: o receiver
+     * relança a AapActivity, o WM dá fullscreen por padrão, e o AA volta a cobrir
+     * a barra nativa da central. O enforceWindow é idempotente e devolve null
+     * quando não há nada a fazer, então o tick silencioso não custa nada além de
+     * um `am stack list`.
+     */
+    private final Runnable aaWatchRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!sAaWatchActive) return;
+            try {
+                String component = br.com.redesurftank.havalenginereverse.AaSplitPrefs
+                        .INSTANCE.component(UniversalMonitorService.this);
+                if (component != null && !component.isEmpty()) {
+                    br.com.redesurftank.havalenginereverse.utils.WindowModeUtils w =
+                            br.com.redesurftank.havalenginereverse.utils.WindowModeUtils.INSTANCE;
+                    br.com.redesurftank.havalenginereverse.utils.WindowModeUtils.Area area =
+                            w.usableArea();
+                    if (area != null) {
+                        Integer bar = br.com.redesurftank.havalenginereverse.AaSplitPrefs
+                                .INSTANCE.sidebarPxOrNull(UniversalMonitorService.this, area);
+                        String applied = w.enforceWindow(component, area, bar);
+                        if (applied != null) {
+                            Log.w(TAG, "[aa-watch] reaplicou a janela\n" + applied);
+                            br.com.redesurftank.havalenginereverse.AaSplitLog.INSTANCE
+                                    .add("[watch] reaplicou a janela do AA");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "[aa-watch] falhou: " + e.getMessage(), e);
+            }
+            if (backgroundHandler != null) backgroundHandler.postDelayed(this, AA_WATCH_INTERVAL_MS);
+        }
+    };
+
+    /** Liga/desliga o guardião da janela do AA. Persiste, então sobrevive a reboot. */
+    public static void setAaWatchActive(android.content.Context ctx, boolean enabled) {
+        sAaWatchActive = enabled;
+        try {
+            ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putBoolean(PREF_AA_WATCH_ENABLED, enabled).apply();
+        } catch (Exception ignored) {}
+        UniversalMonitorService s = sInstance;
+        if (s == null || s.backgroundHandler == null) return;
+        s.backgroundHandler.removeCallbacks(s.aaWatchRunnable);
+        if (enabled) s.backgroundHandler.post(s.aaWatchRunnable);
+    }
+
+    public static boolean isAaWatchActive() { return sAaWatchActive; }
 
     /** Reaplica o último valor conhecido a cada intervalo — enquanto o espelhamento estiver ligado. */
     private final Runnable mirrorReapplyRunnable = new Runnable() {

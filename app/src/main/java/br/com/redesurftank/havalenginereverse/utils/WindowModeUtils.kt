@@ -521,6 +521,77 @@ object WindowModeUtils {
         return s.toString()
     }
 
+    /** Onde o AA deve ficar: área utilizável menos a faixa da barra, se houver. */
+    fun targetBounds(area: Area, sidebarPx: Int?): Area =
+        if (sidebarPx != null && sidebarPx > 0) area.copy(left = area.left + sidebarPx) else area
+
+    /**
+     * Força a renegociação: derruba o receiver, recria a task já em freeform no
+     * tamanho que queremos, e deixa o próximo handshake acontecer nela.
+     *
+     * A ordem é o ponto todo. O tamanho do vídeo é combinado com o celular na
+     * conexão, e vive na task, não no app — então recriar a task ANTES da conexão
+     * é o que faz o AA entrar já na nossa janela. Redimensionar depois só escala
+     * um stream que já foi negociado errado.
+     *
+     * Depois disto o AA fica numa janela vazia até o celular reconectar; em USB
+     * isso normalmente é automático, senão é replugar o cabo.
+     */
+    fun prepareWindow(component: String, area: Area, sidebarPx: Int?): String {
+        val s = Steps()
+        val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG || !component.contains("/")) {
+            s.say("!! escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
+        val b = targetBounds(area, sidebarPx)
+        s.say("janela alvo: $b")
+
+        s.exec("am force-stop $pkg", "sessão atual derrubada")
+        s.exec("am start --windowingMode $MODE_FREEFORM -n $component", "task recriada em freeform")
+
+        val task = taskIdOf(pkg)
+        if (task == null) {
+            s.say("!! a task não subiu — o receiver pode recusar abrir sem celular conectado.")
+            s.say("   nesse caso conecte o celular e use o botão \"Manter a janela\" ligado.")
+            return s.toString()
+        }
+        s.exec("am task resizeable $task 2")
+        s.exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
+        s.say("modo: " + modeOfPkg(pkg) + ", bounds: " + boundsOfTask(task))
+        s.say("agora reconecte o celular — o handshake vai negociar ${b.width}x${b.height}.")
+        return s.toString()
+    }
+
+    /**
+     * Guardião idempotente, para o watcher chamar de tempo em tempo.
+     *
+     * Devolve null quando a janela já está como queremos — o chamador usa isso pra
+     * não poluir log nem gastar processo. Reaplica quando o AA volta fullscreen,
+     * o que acontece a cada reconexão do celular e depois de um HOME.
+     */
+    fun enforceWindow(component: String, area: Area, sidebarPx: Int?): String? {
+        val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG) return null
+        val dump = stacks()
+        val task = listTasks().firstOrNull { it.pkg == pkg } ?: return null
+        val b = targetBounds(area, sidebarPx)
+        val want = "[${b.left},${b.top}][${b.right},${b.bottom}]"
+        val mode = stackWindowingMode(dump, task.stackId)
+        val bounds = boundsOfTask(task.taskId)
+        if (mode == "freeform" && bounds == want) return null
+
+        val s = Steps()
+        s.say("janela fora do lugar (modo=$mode bounds=$bounds, queria freeform $want)")
+        if (mode != "freeform") {
+            s.exec("am start --windowingMode $MODE_FREEFORM -n $component")
+        }
+        val t = taskIdOf(pkg) ?: task.taskId
+        s.exec("am task resizeable $t 2")
+        s.exec("am task resize $t ${b.left} ${b.top} ${b.right} ${b.bottom}")
+        return s.toString()
+    }
+
     /** Modo efetivo da stack onde o pacote está — o que o WM concedeu de fato. */
     fun modeOfPkg(pkg: String): String {
         val dump = stacks()

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import br.com.redesurftank.havalenginereverse.utils.WindowModeUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -54,6 +55,24 @@ object AaSplitPrefs {
     fun setPercent(ctx: Context, v: Int) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_PERCENT, v).apply()
     }
+
+    /**
+     * Barra própria desligada por padrão: a barra nativa de 128px da central já
+     * serve, e o ganho do freeform é justamente não deixar o AA cobri-la.
+     */
+    fun sidebarEnabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SIDEBAR, false)
+
+    fun setSidebarEnabled(ctx: Context, v: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SIDEBAR, v).apply()
+    }
+
+    /** Largura da barra em px, ou null quando o AA deve ocupar a área toda. */
+    fun sidebarPxOrNull(ctx: Context, area: WindowModeUtils.Area): Int? =
+        if (sidebarEnabled(ctx)) area.width * percent(ctx).coerceIn(10, 70) / 100 else null
+
+    private const val KEY_SIDEBAR = "aa_split_sidebar_enabled"
 }
 
 /**
@@ -102,6 +121,8 @@ fun AaSplitTab() {
     var confirmReboot by remember { mutableStateOf(false) }
     var fbBusy by remember { mutableStateOf(false) }
     var fbMsg by remember { mutableStateOf("") }
+    var useSidebar by remember { mutableStateOf(AaSplitPrefs.sidebarEnabled(context)) }
+    var watchOn by remember { mutableStateOf(UniversalMonitorService.isAaWatchActive()) }
 
     fun addLog(s: String) = AaSplitLog.add(s)
 
@@ -126,6 +147,8 @@ fun AaSplitTab() {
 
     val percent = percentTxt.toIntOrNull()?.coerceIn(10, 70) ?: 30
     val sidebarPx = area?.let { it.width * percent / 100 }
+    /** null = AA ocupa a área toda; a barra nativa da central já faz o papel da barra. */
+    val effectivePx = if (useSidebar) sidebarPx else null
 
     Column(
         modifier = Modifier
@@ -390,6 +413,62 @@ fun AaSplitTab() {
                     "handshake, e redimensionar depois não renegocia nada — o stream continua " +
                     "no tamanho antigo e chega escalado. F posiciona a janela primeiro e só " +
                     "então derruba o receiver, pro handshake acontecer já no tamanho novo.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+        }
+
+        // ── 4c. Modo permanente ──────────────────────────────────────────
+        SplitCard("4c · Modo permanente (é o que você quer)") {
+            Text(
+                "Forçar a renegociação: derruba o receiver, recria a task já em freeform no " +
+                    "tamanho certo, e o próximo handshake acontece nela. O tamanho do vídeo " +
+                    "vive na task, não no app — é por isso que a ordem importa.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Switch(
+                    checked = useSidebar,
+                    onCheckedChange = {
+                        useSidebar = it
+                        AaSplitPrefs.setSidebarEnabled(context, it)
+                    }
+                )
+                Text(
+                    if (useSidebar) "com barra nossa na esquerda ($percent%)"
+                    else "sem barra nossa — AA na área toda, barra nativa preservada",
+                    color = Color(0xFF90A4AE), fontSize = 11.sp
+                )
+            }
+            val a3 = area
+            SplitButton(
+                "Preparar janela e reconectar", busy, accent = Color(0xFF1B5E20)
+            ) {
+                if (a3 == null) addLog("rode o Escanear antes")
+                else run("Preparando a janela") {
+                    WindowModeUtils.prepareWindow(component.trim(), a3, effectivePx)
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Switch(
+                    checked = watchOn,
+                    onCheckedChange = {
+                        watchOn = it
+                        UniversalMonitorService.setAaWatchActive(context, it)
+                        addLog(if (it) "guardião da janela ligado" else "guardião desligado")
+                    }
+                )
+                Text("Manter a janela (reaplica a cada 5s)", color = Color(0xFF90A4AE), fontSize = 11.sp)
+            }
+            Text(
+                "O guardião existe porque o AA volta pra fullscreen a cada reconexão do " +
+                    "celular e depois de um HOME. Ele roda no serviço em primeiro plano, " +
+                    "persiste no boot, e só age quando a janela sai do lugar.",
                 color = Color(0xFF78909C), fontSize = 10.sp
             )
         }
