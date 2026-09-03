@@ -271,9 +271,11 @@ fun AaSplitTab() {
                 )
             }
             Text(
-                "A área útil não é a tela: aqui a barra de sistema come 128px na esquerda " +
-                    "(mBounds 0..1792 mas mAppBounds 128..1920), então posicionar em x=0 " +
-                    "esconde a barra debaixo dela.",
+                "A área útil não é a tela: a barra nativa come 128px na esquerda (mBounds " +
+                    "0..1792 mas mAppBounds 128..1920) e mais 60px na vertical — uma stack " +
+                    "fullscreen sai h660dp, não 720. Em freeform o WM não aplica esse " +
+                    "desconto, então quem tem que aplicar somos nós; era isso que cortava o " +
+                    "topo do AA.",
                 color = Color(0xFF78909C), fontSize = 10.sp
             )
         }
@@ -354,7 +356,40 @@ fun AaSplitTab() {
             }
             Text(
                 "D serve quando o AA já está na direita (a task lembra os bounds) e só a " +
-                    "barra falta — foi o caso de 01/09: o AA foi, a barra não subiu.",
+                    "barra falta.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+        }
+
+        // ── 4b. Sem barra nossa ──────────────────────────────────────────
+        SplitCard("4b · AA sozinho, área inteira") {
+            Text(
+                "Sem barra nossa: o AA ocupa a área utilizável toda, contando com a barra " +
+                    "nativa de 128px da central. É o teste que separa as duas causas do " +
+                    "conteúdo cortado — se aqui aparece inteiro, o problema era a largura " +
+                    "estreita; se continua cortado, é o freeform em si.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+            val a2 = area
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitButton("E · Área inteira", busy, accent = Color(0xFF1B5E20)) {
+                    if (a2 == null) addLog("rode o Escanear antes")
+                    else run("AA na área inteira") {
+                        WindowModeUtils.applyFullArea(component.trim(), a2)
+                    }
+                }
+                SplitButton("F · Posicionar e reconectar", busy, accent = Color(0xFF4A148C)) {
+                    if (a2 == null) addLog("rode o Escanear antes")
+                    else run("Posicionando e derrubando o receiver") {
+                        WindowModeUtils.resizeThenReconnect(component.trim(), a2, null)
+                    }
+                }
+            }
+            Text(
+                "F ataca a resolução: o receiver negocia o tamanho do vídeo com o celular no " +
+                    "handshake, e redimensionar depois não renegocia nada — o stream continua " +
+                    "no tamanho antigo e chega escalado. F posiciona a janela primeiro e só " +
+                    "então derruba o receiver, pro handshake acontecer já no tamanho novo.",
                 color = Color(0xFF78909C), fontSize = 10.sp
             )
         }

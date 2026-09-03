@@ -168,11 +168,8 @@ object WindowModeUtils {
 
     fun stacks(): String = sh("am stack list")
 
-    /**
-     * Área utilizável, lida do mAppBounds do primeiro stack. Cai pro tamanho da
-     * tela se o dump não trouxer mAppBounds.
-     */
-    fun usableArea(): Area? {
+    /** mAppBounds cru, sem descontar a decoração vertical. */
+    fun appBoundsArea(): Area? {
         val m = Regex("""mAppBounds=Rect\((\d+), (\d+) - (\d+), (\d+)\)""").find(stacks())
         if (m != null) {
             return Area(
@@ -182,6 +179,63 @@ object WindowModeUtils {
         }
         val s = screenSize() ?: return null
         return Area(0, 0, s.width, s.height)
+    }
+
+    fun densityDpi(): Int {
+        val line = sh("wm density").lines().firstOrNull { it.contains("density", true) } ?: ""
+        return Regex("""(\d+)""").find(line)?.groupValues?.get(1)?.toInt() ?: 160
+    }
+
+    /**
+     * Quanto de decoração vertical o sistema tira de uma janela fullscreen.
+     *
+     * O mAppBounds tem 720 de altura, mas a configuration de uma stack fullscreen
+     * diz h660dp — são 60px de barra que o WM desconta só no screenHeightDp. Uma
+     * janela freeform NÃO recebe esse desconto (sai h720dp), então o app desenha
+     * como se tivesse 720 e a barra come o conteúdo. Era isso que cortava o AA.
+     */
+    fun verticalInset(): Int {
+        val fs = stacks().lines().firstOrNull {
+            it.contains("mWindowingMode=fullscreen") && it.contains("mAppBounds=")
+        } ?: return 0
+        val ab = Regex("""mAppBounds=Rect\((\d+), (\d+) - (\d+), (\d+)\)""").find(fs) ?: return 0
+        val hPx = ab.groupValues[4].toInt() - ab.groupValues[2].toInt()
+        val hDp = Regex("""\bh(\d+)dp""").find(fs)?.groupValues?.get(1)?.toInt() ?: return 0
+        val dpi = densityDpi()
+        if (dpi <= 0) return 0
+        return (hPx - hDp * dpi / 160).coerceAtLeast(0)
+    }
+
+    /** Frames das barras do sistema — é o que diz se a decoração é em cima ou embaixo. */
+    fun systemBarFrames(): String = sh(
+        "dumpsys window windows | grep -i -A4 -E \"window\\{.*(statusbar|navigationbar|navbar)\"" +
+            " | grep -E \"Window\\{|mFrame\""
+    )
+
+    /** True se a barra do sistema fica no topo. Na dúvida assume topo. */
+    fun insetAtTop(screenHeight: Int): Boolean {
+        val frames = Regex("""mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]""")
+            .findAll(systemBarFrames()).toList()
+        val bar = frames.firstOrNull {
+            val h = it.groupValues[4].toInt() - it.groupValues[2].toInt()
+            h in 1 until screenHeight / 2
+        } ?: return true
+        return bar.groupValues[2].toInt() < screenHeight / 2
+    }
+
+    /**
+     * Área utilizável de verdade: mAppBounds menos a decoração vertical.
+     *
+     * Uma janela freeform posicionada em y=0 fica debaixo da barra do sistema,
+     * porque em freeform o WM não aplica o inset — quem tem que aplicar é quem
+     * define os bounds, ou seja, nós.
+     */
+    fun usableArea(): Area? {
+        val base = appBoundsArea() ?: return null
+        val inset = verticalInset()
+        if (inset <= 0) return base
+        return if (insetAtTop(base.bottom)) base.copy(top = base.top + inset)
+        else base.copy(bottom = base.bottom - inset)
     }
 
     /**
@@ -284,7 +338,14 @@ object WindowModeUtils {
         appendLine(sh("wm density"))
         appendLine()
         appendLine("== area utilizavel ==")
+        appendLine("appBounds  = " + (appBoundsArea()?.toString() ?: "?"))
         appendLine("usableArea = " + (usableArea()?.toString() ?: "?"))
+        appendLine("densityDpi = " + densityDpi())
+        appendLine("verticalInset = " + verticalInset())
+        appendLine("insetAtTop = " + insetAtTop(appBoundsArea()?.bottom ?: 720))
+        appendLine()
+        appendLine("== frames das barras do sistema ==")
+        appendLine(systemBarFrames())
         appendLine()
         appendLine("== features de multi-window ==")
         appendLine(sh("pm list features | grep -i -E \"freeform|multiwindow|picture|split\""))
@@ -396,6 +457,68 @@ object WindowModeUtils {
             "barra: modo " + stackWindowingMode(stacks(), barTask.stackId) +
                 ", bounds " + boundsOfTask(barTask.taskId)
         )
+    }
+
+    /**
+     * AA sozinho, em freeform, ocupando a área utilizável inteira — sem barra
+     * nossa, contando com a barra nativa de 128px da central.
+     *
+     * Serve pra separar as duas causas do conteúdo cortado: se aqui o AA aparece
+     * inteiro, o problema era a largura estreita (resolução negociada no
+     * handshake); se continua cortado, o problema é o freeform em si.
+     */
+    fun applyFullArea(component: String, area: Area): String {
+        val s = Steps()
+        val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG) {
+            s.say("!! escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
+        s.exec("am force-stop $SIDEBAR_PKG", "barra fora")
+        s.say("área utilizável (já sem a barra do sistema): $area")
+        val task = taskIdOf(pkg)
+        if (task == null) {
+            s.say("!! não achei a task de $pkg — abra o Android Auto")
+            return s.toString()
+        }
+        s.exec("am task resizeable $task 2")
+        s.exec("am task resize $task ${area.left} ${area.top} ${area.right} ${area.bottom}")
+        s.say("modo efetivo: " + modeOfPkg(pkg))
+        s.say("bounds agora: " + boundsOfTask(task))
+        return s.toString()
+    }
+
+    /**
+     * Redimensiona e força o handshake de novo.
+     *
+     * O receiver AAP negocia a resolução do vídeo com o celular na conexão;
+     * redimensionar a janela depois não renegocia nada, o stream continua no
+     * tamanho antigo e chega escalado/cortado. Então a ordem certa é: posicionar a
+     * janela primeiro, derrubar o receiver, e deixar o celular refazer o handshake
+     * já com o tamanho novo.
+     */
+    fun resizeThenReconnect(component: String, area: Area, sidebarPx: Int?): String {
+        val s = Steps()
+        val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG) {
+            s.say("!! escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
+        val left = if (sidebarPx != null) area.left + sidebarPx else area.left
+        val task = taskIdOf(pkg)
+        if (task != null) {
+            s.exec("am task resizeable $task 2")
+            s.exec(
+                "am task resize $task $left ${area.top} ${area.right} ${area.bottom}",
+                "janela posicionada ANTES do handshake"
+            )
+        } else {
+            s.say("(AA não está aberto — vai negociar já no tamanho da task nova)")
+        }
+        s.exec("am force-stop $pkg", "receiver derrubado — o celular vai reconectar")
+        s.say("agora espere o AA voltar sozinho, ou desconecte e reconecte o cabo.")
+        s.say("se voltar fullscreen, rode o A/C de novo: o tamanho fica na task, não no app.")
+        return s.toString()
     }
 
     /** Modo efetivo da stack onde o pacote está — o que o WM concedeu de fato. */
