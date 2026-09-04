@@ -72,7 +72,21 @@ object AaSplitPrefs {
     fun sidebarPxOrNull(ctx: Context, area: WindowModeUtils.Area): Int? =
         if (sidebarEnabled(ctx)) area.width * percent(ctx).coerceIn(10, 70) / 100 else null
 
+    /**
+     * Quanto subir a janela pra esconder a caption bar. -1 (padrão) = usa a altura
+     * detectada nos recursos do sistema; 0 = não esconde.
+     */
+    fun captionPx(ctx: Context): Int {
+        val v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_CAPTION, -1)
+        return if (v >= 0) v else WindowModeUtils.captionHeightPx()
+    }
+
+    fun setCaptionPx(ctx: Context, v: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_CAPTION, v).apply()
+    }
+
     private const val KEY_SIDEBAR = "aa_split_sidebar_enabled"
+    private const val KEY_CAPTION = "aa_split_caption_px"
 }
 
 /**
@@ -123,6 +137,7 @@ fun AaSplitTab() {
     var fbMsg by remember { mutableStateOf("") }
     var useSidebar by remember { mutableStateOf(AaSplitPrefs.sidebarEnabled(context)) }
     var watchOn by remember { mutableStateOf(UniversalMonitorService.isAaWatchActive()) }
+    var captionTxt by remember { mutableStateOf(AaSplitPrefs.captionPx(context).toString()) }
 
     fun addLog(s: String) = AaSplitLog.add(s)
 
@@ -398,7 +413,9 @@ fun AaSplitTab() {
                 SplitButton("E · Área inteira", busy, accent = Color(0xFF1B5E20)) {
                     if (a2 == null) addLog("rode o Escanear antes")
                     else run("AA na área inteira") {
-                        WindowModeUtils.applyFullArea(component.trim(), a2)
+                        WindowModeUtils.applyFullArea(
+                            component.trim(), a2, captionTxt.toIntOrNull() ?: 0
+                        )
                     }
                 }
                 SplitButton("F · Posicionar e reconectar", busy, accent = Color(0xFF4A148C)) {
@@ -442,13 +459,46 @@ fun AaSplitTab() {
                     color = Color(0xFF90A4AE), fontSize = 11.sp
                 )
             }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = captionTxt,
+                    onValueChange = {
+                        captionTxt = it.filter { c -> c.isDigit() }.take(3)
+                        captionTxt.toIntOrNull()?.let { v -> AaSplitPrefs.setCaptionPx(context, v) }
+                    },
+                    label = { Text("recuo caption px", fontSize = 11.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = TextStyle(color = Color(0xFFE0E0E0), fontSize = 12.sp),
+                    modifier = Modifier.width(150.dp)
+                )
+                Text(
+                    "0 = deixa a barra azul aparecer. Detectado: " +
+                        "${WindowModeUtils.captionHeightPx()}px",
+                    color = Color(0xFF90A4AE), fontSize = 11.sp
+                )
+            }
+            Text(
+                "A barra azul é a caption bar que o Android 9 desenha DENTRO de toda janela " +
+                    "freeform — é uma View no DecorView do processo do AA, não uma janela do " +
+                    "WM, então não sai por shell. Ela também é a causa do corte: empurra o " +
+                    "conteúdo pra baixo e o rodapé sobra fora. Subindo a janela por essa " +
+                    "altura, a caption cai debaixo da barra de status e o conteúdo volta a " +
+                    "começar no topo da área útil — resolve os dois de uma vez.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
             val a3 = area
             SplitButton(
                 "Preparar janela e reconectar", busy, accent = Color(0xFF1B5E20)
             ) {
                 if (a3 == null) addLog("rode o Escanear antes")
                 else run("Preparando a janela") {
-                    WindowModeUtils.prepareWindow(component.trim(), a3, effectivePx)
+                    WindowModeUtils.prepareWindow(
+                        component.trim(), a3, effectivePx, captionTxt.toIntOrNull() ?: 0
+                    )
                 }
             }
             Row(

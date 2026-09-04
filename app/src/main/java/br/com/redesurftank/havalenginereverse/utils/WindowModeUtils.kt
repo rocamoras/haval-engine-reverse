@@ -208,8 +208,8 @@ object WindowModeUtils {
 
     /** Frames das barras do sistema — é o que diz se a decoração é em cima ou embaixo. */
     fun systemBarFrames(): String = sh(
-        "dumpsys window windows | grep -i -A4 -E \"window\\{.*(statusbar|navigationbar|navbar)\"" +
-            " | grep -E \"Window\\{|mFrame\""
+        "dumpsys window windows | grep -i -A14 -E \"window\\{.*(statusbar|navigationbar|navbar)\"" +
+            " | grep -E \"Window\\{|mFrame=|Requested\""
     )
 
     /** True se a barra do sistema fica no topo. Na dúvida assume topo. */
@@ -343,6 +343,7 @@ object WindowModeUtils {
         appendLine("densityDpi = " + densityDpi())
         appendLine("verticalInset = " + verticalInset())
         appendLine("insetAtTop = " + insetAtTop(appBoundsArea()?.bottom ?: 720))
+        appendLine("captionHeightPx = " + captionHeightPx())
         appendLine()
         appendLine("== frames das barras do sistema ==")
         appendLine(systemBarFrames())
@@ -467,7 +468,7 @@ object WindowModeUtils {
      * inteiro, o problema era a largura estreita (resolução negociada no
      * handshake); se continua cortado, o problema é o freeform em si.
      */
-    fun applyFullArea(component: String, area: Area): String {
+    fun applyFullArea(component: String, area: Area, captionPx: Int = 0): String {
         val s = Steps()
         val pkg = component.substringBefore("/")
         if (pkg.isBlank() || pkg == SIDEBAR_PKG) {
@@ -475,14 +476,15 @@ object WindowModeUtils {
             return s.toString()
         }
         s.exec("am force-stop $SIDEBAR_PKG", "barra fora")
-        s.say("área utilizável (já sem a barra do sistema): $area")
+        val b = targetBounds(area, null, captionPx)
+        s.say("área utilizável: $area → janela $b (caption escondida: ${captionPx}px)")
         val task = taskIdOf(pkg)
         if (task == null) {
             s.say("!! não achei a task de $pkg — abra o Android Auto")
             return s.toString()
         }
         s.exec("am task resizeable $task 2")
-        s.exec("am task resize $task ${area.left} ${area.top} ${area.right} ${area.bottom}")
+        s.exec("am task resize $task ${b.left} ${b.top} ${b.right} ${b.bottom}")
         s.say("modo efetivo: " + modeOfPkg(pkg))
         s.say("bounds agora: " + boundsOfTask(task))
         return s.toString()
@@ -521,9 +523,39 @@ object WindowModeUtils {
         return s.toString()
     }
 
-    /** Onde o AA deve ficar: área utilizável menos a faixa da barra, se houver. */
-    fun targetBounds(area: Area, sidebarPx: Int?): Area =
-        if (sidebarPx != null && sidebarPx > 0) area.copy(left = area.left + sidebarPx) else area
+    /**
+     * Altura da caption bar (a barra azul) que o Android 9 desenha DENTRO de toda
+     * janela freeform.
+     *
+     * Ela não é uma janela do WM — é uma View no topo do DecorView, no processo do
+     * próprio app. Por isso não aparece em `dumpsys window` e não dá pra remover
+     * por shell: só o processo do AA pode tirá-la. O que dá por fora é subir a
+     * janela pra caption ficar debaixo da barra de status.
+     */
+    fun captionHeightPx(): Int {
+        val res = android.content.res.Resources.getSystem()
+        listOf("decor_caption_height", "decor_caption_title_height").forEach { name ->
+            val id = res.getIdentifier(name, "dimen", "android")
+            if (id != 0) {
+                val px = res.getDimensionPixelSize(id)
+                if (px > 0) return px
+            }
+        }
+        return 32 * densityDpi() / 160
+    }
+
+    /**
+     * Onde o AA deve ficar: área utilizável menos a faixa da barra, se houver.
+     *
+     * @param captionPx sobe a janela por essa altura, pra caption cair debaixo da
+     *   barra de status. O conteúdo do app passa a começar exatamente em area.top,
+     *   e a altura visível volta a ser a área útil inteira — é o que resolve o
+     *   corte no rodapé, que era a caption empurrando o conteúdo pra baixo.
+     */
+    fun targetBounds(area: Area, sidebarPx: Int?, captionPx: Int = 0): Area {
+        val left = if (sidebarPx != null && sidebarPx > 0) area.left + sidebarPx else area.left
+        return Area(left, area.top - captionPx.coerceAtLeast(0), area.right, area.bottom)
+    }
 
     /**
      * Força a renegociação: derruba o receiver, recria a task já em freeform no
@@ -537,15 +569,15 @@ object WindowModeUtils {
      * Depois disto o AA fica numa janela vazia até o celular reconectar; em USB
      * isso normalmente é automático, senão é replugar o cabo.
      */
-    fun prepareWindow(component: String, area: Area, sidebarPx: Int?): String {
+    fun prepareWindow(component: String, area: Area, sidebarPx: Int?, captionPx: Int): String {
         val s = Steps()
         val pkg = component.substringBefore("/")
         if (pkg.isBlank() || pkg == SIDEBAR_PKG || !component.contains("/")) {
             s.say("!! escolha a task do Android Auto no passo 1")
             return s.toString()
         }
-        val b = targetBounds(area, sidebarPx)
-        s.say("janela alvo: $b")
+        val b = targetBounds(area, sidebarPx, captionPx)
+        s.say("janela alvo: $b (caption escondida: ${captionPx}px)")
 
         s.exec("am force-stop $pkg", "sessão atual derrubada")
         s.exec("am start --windowingMode $MODE_FREEFORM -n $component", "task recriada em freeform")
@@ -570,12 +602,12 @@ object WindowModeUtils {
      * não poluir log nem gastar processo. Reaplica quando o AA volta fullscreen,
      * o que acontece a cada reconexão do celular e depois de um HOME.
      */
-    fun enforceWindow(component: String, area: Area, sidebarPx: Int?): String? {
+    fun enforceWindow(component: String, area: Area, sidebarPx: Int?, captionPx: Int): String? {
         val pkg = component.substringBefore("/")
         if (pkg.isBlank() || pkg == SIDEBAR_PKG) return null
         val dump = stacks()
         val task = listTasks().firstOrNull { it.pkg == pkg } ?: return null
-        val b = targetBounds(area, sidebarPx)
+        val b = targetBounds(area, sidebarPx, captionPx)
         val want = "[${b.left},${b.top}][${b.right},${b.bottom}]"
         val mode = stackWindowingMode(dump, task.stackId)
         val bounds = boundsOfTask(task.taskId)

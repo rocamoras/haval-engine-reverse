@@ -1247,7 +1247,9 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
                     if (area != null) {
                         Integer bar = br.com.redesurftank.havalenginereverse.AaSplitPrefs
                                 .INSTANCE.sidebarPxOrNull(UniversalMonitorService.this, area);
-                        String applied = w.enforceWindow(component, area, bar);
+                        int caption = br.com.redesurftank.havalenginereverse.AaSplitPrefs
+                                .INSTANCE.captionPx(UniversalMonitorService.this);
+                        String applied = w.enforceWindow(component, area, bar, caption);
                         if (applied != null) {
                             Log.w(TAG, "[aa-watch] reaplicou a janela\n" + applied);
                             br.com.redesurftank.havalenginereverse.AaSplitLog.INSTANCE
