@@ -523,6 +523,50 @@ fun AaSplitTab() {
             )
         }
 
+        // ── 4d. Isolar a causa do corte ──────────────────────────────────
+        SplitCard("4d · De onde vem o corte") {
+            Text(
+                "O recuo da caption não mudou nada, então a caption não é a causa. A " +
+                    "hipótese que sobra: o receiver pede ao celular o tamanho do DISPLAY " +
+                    "(1920x720), não o da janela, e desenha esse vídeo dentro de um " +
+                    "retângulo menor — sobra fora exatamente a diferença. G e H testam isso.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitButton("G · Janela = display", busy, accent = Color(0xFF00695C)) {
+                    run("Janela do tamanho do display") {
+                        WindowModeUtils.applyDisplayFull(component.trim())
+                    }
+                }
+                SplitButton("Ver janela real", busy) {
+                    run("dumpsys window do alvo") {
+                        WindowModeUtils.appWindowDump(component.substringBefore("/").trim())
+                    }
+                }
+            }
+            Text(
+                "G põe a janela em 0,0-1920,720 (freeform, cobrindo a barra nativa de novo). " +
+                    "Se o conteúdo aparecer COMPLETO, o corte é por janela < display, e o " +
+                    "caminho passa a ser H. Se continuar cortado, é o freeform em si.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SplitButton("H · Overscan 128,60,0,0", busy, accent = Color(0xFF4A148C)) {
+                    run("Aplicando overscan") { WindowModeUtils.setOverscan(128, 60, 0, 0) }
+                }
+                SplitButton("Zerar overscan", busy, accent = Color(0xFF6D4C41)) {
+                    run("Zerando overscan") { WindowModeUtils.clearOverscan() }
+                }
+            }
+            Text(
+                "H encolhe a área utilizável do display INTEIRO — aí o AA pode voltar a ser " +
+                    "fullscreen (sem freeform, sem caption) num display logicamente menor, " +
+                    "deixando a barra nativa de fora. Mexe em tudo, então a barra nativa " +
+                    "pode se deslocar; \"Zerar\" desfaz, e no pior caso um reboot resolve.",
+                color = Color(0xFFFFAB91), fontSize = 10.sp
+            )
+        }
+
         // ── 5. Comando livre ─────────────────────────────────────────────
         SplitCard("5 · Comando livre") {
             OutlinedTextField(

@@ -212,6 +212,32 @@ object WindowModeUtils {
             " | grep -E \"Window\\{|mFrame=|Requested\""
     )
 
+    /**
+     * O que a janela do app REALMENTE recebeu, do lado do WindowManager.
+     *
+     * As bounds da task (`am stack list`) são o que pedimos; mFrame/mContentFrame
+     * são o que o WM entregou. Quando os dois divergem, foi clamp — e é a única
+     * forma de saber, porque o `am task resize` aceita qualquer retângulo calado.
+     */
+    fun appWindowDump(pkg: String): String {
+        if (pkg.isBlank()) return "(sem alvo)"
+        return sh(
+            "dumpsys window windows | grep -A30 -E \"Window #[0-9]+ Window\\{.*" + pkg + "\"" +
+                " | grep -E \"Window #|mFrame=|mContentFrame|mDecorFrame|mVisibleFrame" +
+                "|Requested |mSystemUiVisibility|mHasSurface|mAppOp\""
+        )
+    }
+
+    /**
+     * Logcat do receiver. É onde aparece a resolução que ele combinou com o
+     * celular — o número que decide se o corte é de janela ou de stream.
+     */
+    fun projectionLogcat(): String = sh(
+        "logcat -d -t 1200 | grep -i -E " +
+            "\"androidauto|aapactivity|projection|videoconfig|resolution|videofocus" +
+            "|h264|surfaceview|1920x|1792x|displaymetrics\" | tail -70"
+    )
+
     /** True se a barra do sistema fica no topo. Na dúvida assume topo. */
     fun insetAtTop(screenHeight: Int): Boolean {
         val frames = Regex("""mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]""")
@@ -379,6 +405,12 @@ object WindowModeUtils {
                 )
             )
         }
+        appendLine()
+        appendLine("== janela real do alvo (o que o WM entregou) ==")
+        appendLine(appWindowDump(pkg))
+        appendLine()
+        appendLine("== logcat do receiver (resolucao negociada) ==")
+        appendLine(projectionLogcat())
         appendLine()
         appendLine("== logcat AM/WM (400) ==")
         appendLine(sh("logcat -d -t 400 -s ActivityManager:V ActivityTaskManager:V WindowManager:V"))
@@ -621,6 +653,68 @@ object WindowModeUtils {
         val t = taskIdOf(pkg) ?: task.taskId
         s.exec("am task resizeable $t 2")
         s.exec("am task resize $t ${b.left} ${b.top} ${b.right} ${b.bottom}")
+        return s.toString()
+    }
+
+    /**
+     * Janela = display inteiro, em freeform.
+     *
+     * O teste que separa as duas hipóteses do corte. Se aqui o conteúdo aparece
+     * completo, o corte vem de a janela ser menor que o display — o receiver
+     * provavelmente pede o tamanho do DISPLAY ao celular (não o da janela) e
+     * desenha 1920x720 dentro de um retângulo menor. Se continuar cortado com a
+     * janela do tamanho do display, o problema é do freeform em si.
+     */
+    fun applyDisplayFull(component: String): String {
+        val s = Steps()
+        val pkg = component.substringBefore("/")
+        if (pkg.isBlank() || pkg == SIDEBAR_PKG || !component.contains("/")) {
+            s.say("!! escolha a task do Android Auto no passo 1")
+            return s.toString()
+        }
+        val scr = screenSize()
+        if (scr == null) {
+            s.say("!! não li o tamanho da tela")
+            return s.toString()
+        }
+        s.exec("am force-stop $SIDEBAR_PKG")
+        s.exec("am force-stop $pkg", "sessão derrubada")
+        s.exec("am start --windowingMode $MODE_FREEFORM -n $component")
+        val task = taskIdOf(pkg)
+        if (task == null) {
+            s.say("!! a task não subiu")
+            return s.toString()
+        }
+        s.exec("am task resizeable $task 2")
+        s.exec("am task resize $task 0 0 ${scr.width} ${scr.height}", "janela = display inteiro")
+        s.say("bounds: " + boundsOfTask(task) + ", modo: " + modeOfPkg(pkg))
+        s.say("reconecte o celular e veja se o corte sumiu.")
+        return s.toString()
+    }
+
+    /**
+     * Experimento: encolhe a área utilizável do display INTEIRO por overscan.
+     *
+     * Se o receiver pede o tamanho do display, essa é a única alavanca que muda o
+     * número que ele pede — e sem freeform nenhum: o AA voltaria a ser fullscreen,
+     * só que num display logicamente menor, deixando a barra nativa de fora.
+     *
+     * Mexe no display todo, então a barra nativa também pode se deslocar. Tem
+     * botão de zerar; no pior caso um reboot volta ao normal.
+     */
+    fun setOverscan(left: Int, top: Int, right: Int, bottom: Int): String {
+        val s = Steps()
+        s.exec("wm overscan $left,$top,$right,$bottom")
+        s.exec("wm size")
+        s.say("appBounds agora: " + (appBoundsArea()?.toString() ?: "?"))
+        return s.toString()
+    }
+
+    fun clearOverscan(): String {
+        val s = Steps()
+        s.exec("wm overscan reset")
+        s.exec("wm overscan 0,0,0,0")
+        s.say("appBounds agora: " + (appBoundsArea()?.toString() ?: "?"))
         return s.toString()
     }
 
