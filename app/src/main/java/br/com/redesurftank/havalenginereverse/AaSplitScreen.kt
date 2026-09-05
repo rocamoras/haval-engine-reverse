@@ -138,6 +138,8 @@ fun AaSplitTab() {
     var useSidebar by remember { mutableStateOf(AaSplitPrefs.sidebarEnabled(context)) }
     var watchOn by remember { mutableStateOf(UniversalMonitorService.isAaWatchActive()) }
     var captionTxt by remember { mutableStateOf(AaSplitPrefs.captionPx(context).toString()) }
+    var fbCountdown by remember { mutableIntStateOf(0) }
+    var fbTrigger by remember { mutableIntStateOf(0) }
 
     fun addLog(s: String) = AaSplitLog.add(s)
 
@@ -594,45 +596,68 @@ fun AaSplitTab() {
                     "log desta aba e envia. O log sobrevive a relançamentos agora.",
                 color = Color(0xFF78909C), fontSize = 10.sp
             )
+            Text(
+                "As duas medidas que importam — a janela real do alvo e as camadas do " +
+                    "SurfaceFlinger — só existem enquanto o AA está NA TELA. Nos três últimos " +
+                    "diagnósticos ele já tinha saído, e essas seções vieram vazias. Use o " +
+                    "botão de 20s: toque, troque pro Android Auto, e deixe lá.",
+                color = Color(0xFF78909C), fontSize = 10.sp
+            )
             SplitButton(
-                if (fbBusy) "enviando…" else "enviar diagnóstico pro Firebase",
-                fbBusy,
-                accent = Color(0xFF00695C)
+                if (fbCountdown > 0) "coletando em ${fbCountdown}s…"
+                else if (fbBusy) "enviando…"
+                else "coletar em 20s (com o AA na tela) e enviar",
+                fbBusy || fbCountdown > 0,
+                accent = Color(0xFF1B5E20)
             ) {
-                fbBusy = true
-                fbMsg = "coletando…"
                 scope.launch {
-                    val target = component.trim()
-                    val tabLog = AaSplitLog.dump()
-                    val diag = withContext(Dispatchers.IO) {
-                        WindowModeUtils.collectDiagnostics(target, tabLog)
-                    }
-                    val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val name = "aasplit_diag_$ts.txt"
-                    val f = java.io.File(context.cacheDir, name)
-                    withContext(Dispatchers.IO) { f.writeText(diag) }
-                    fbMsg = "enviando ${f.length() / 1024} KB…"
-                    // uploadFile usa Looper internamente — tem que ser na main thread.
-                    FirebaseLogUploader.uploadFile(
-                        file = f, destName = name,
-                        onProgress = { fbMsg = it },
-                        onSuccess = { url ->
-                            fbMsg = "✓ $url"
-                            val cb = context
-                                .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cb.setPrimaryClip(ClipData.newPlainText("firebase-log", url))
-                            fbBusy = false
-                        },
-                        onError = { fbMsg = "erro: $it"; fbBusy = false }
-                    )
+                    addLog("troque pro Android Auto agora — coleto em 20s")
+                    for (i in 20 downTo 1) { fbCountdown = i; delay(1000) }
+                    fbCountdown = 0
+                    fbTrigger++
                 }
             }
+            SplitButton(
+                if (fbBusy) "enviando…" else "enviar diagnóstico agora",
+                fbBusy || fbCountdown > 0,
+                accent = Color(0xFF00695C)
+            ) { fbTrigger++ }
             if (fbMsg.isNotBlank()) {
                 Text(
                     fbMsg, color = Color(0xFF4FC3F7), fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
+        }
+
+        // Coleta+upload num só lugar: os dois botões acima apenas disparam.
+        LaunchedEffect(fbTrigger) {
+            if (fbTrigger == 0 || fbBusy) return@LaunchedEffect
+            fbBusy = true
+            fbMsg = "coletando…"
+            val target = component.trim()
+            val tabLog = AaSplitLog.dump()
+            val diag = withContext(Dispatchers.IO) {
+                WindowModeUtils.collectDiagnostics(target, tabLog)
+            }
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val name = "aasplit_diag_$ts.txt"
+            val f = java.io.File(context.cacheDir, name)
+            withContext(Dispatchers.IO) { f.writeText(diag) }
+            fbMsg = "enviando ${f.length() / 1024} KB…"
+            // uploadFile usa Looper internamente — tem que ser na main thread.
+            FirebaseLogUploader.uploadFile(
+                file = f, destName = name,
+                onProgress = { fbMsg = it },
+                onSuccess = { url ->
+                    fbMsg = "✓ $url"
+                    val cb = context
+                        .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cb.setPrimaryClip(ClipData.newPlainText("firebase-log", url))
+                    fbBusy = false
+                },
+                onError = { fbMsg = "erro: $it"; fbBusy = false }
+            )
         }
 
         // ── Log ──────────────────────────────────────────────────────────

@@ -238,6 +238,33 @@ object WindowModeUtils {
             "|h264|surfaceview|1920x|1792x|displaymetrics\" | tail -70"
     )
 
+    /**
+     * Processos da pilha de projeção.
+     *
+     * O logcat de 04/09 mostrou três em jogo: a AapActivity num processo, um
+     * `VideoResourceManager` noutro, e um `VideoModel` com tag CarPlay num
+     * terceiro. Ou seja o vídeo não é desenhado pelo processo da activity — é
+     * outro dono, e provavelmente com geometria própria.
+     */
+    fun projectionProcesses(): String = sh(
+        "ps -A -o PID,NAME,ARGS 2>/dev/null | grep -i -E \"androidauto|carplay|projection\"" +
+            " | grep -v grep"
+    )
+
+    /**
+     * Camadas do SurfaceFlinger com a geometria de cada uma.
+     *
+     * É a medida decisiva: se o vídeo da projeção for uma layer própria, o
+     * tamanho dela não tem relação nenhuma com a nossa janela — e aí redimensionar
+     * a task nunca vai fazer o conteúdo acompanhar, por mais certo que o retângulo
+     * esteja.
+     */
+    fun surfaceLayers(): String {
+        val list = sh("dumpsys SurfaceFlinger --list | head -60")
+        val geom = sh("dumpsys SurfaceFlinger | grep -E \"^\\+|layerStack=\" | head -120")
+        return "-- nomes --\n" + list + "\n\n-- geometria (nome + layerStack/z/pos/size/crop) --\n" + geom
+    }
+
     /** True se a barra do sistema fica no topo. Na dúvida assume topo. */
     fun insetAtTop(screenHeight: Int): Boolean {
         val frames = Regex("""mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]""")
@@ -407,7 +434,14 @@ object WindowModeUtils {
         }
         appendLine()
         appendLine("== janela real do alvo (o que o WM entregou) ==")
-        appendLine(appWindowDump(pkg))
+        val win = appWindowDump(pkg)
+        appendLine(win.ifBlank { "(vazio — o AA nao estava na tela na hora da coleta)" })
+        appendLine()
+        appendLine("== processos da pilha de projecao ==")
+        appendLine(projectionProcesses())
+        appendLine()
+        appendLine("== camadas do SurfaceFlinger ==")
+        appendLine(surfaceLayers())
         appendLine()
         appendLine("== logcat do receiver (resolucao negociada) ==")
         appendLine(projectionLogcat())
