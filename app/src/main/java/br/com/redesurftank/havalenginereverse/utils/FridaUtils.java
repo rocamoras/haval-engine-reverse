@@ -15,15 +15,20 @@ import rikka.shizuku.Shizuku;
  * Injeção de um script Frida no processo do SystemUI para destravar a exibição da
  * temperatura externa real na barra de status (ver res/raw/com_android_systemui.js).
  *
- * Portado (simplificado) da ferramenta de referência. Requer os binários arm64
- * `fridaserver` e `fridainject` em res/raw. No repositório eles são placeholders
- * minúsculos; um build "gordo" de teste substitui pelos binários reais.
+ * Portado (simplificado) da ferramenta de referência. Requer o binário arm64
+ * `fridainject` em res/raw. No repositório ele é um placeholder minúsculo; o build do
+ * CI substitui pelo binário real (16.7.19), com a recarga da política do SELinux
+ * desligada. Não há frida-server: com `-D local` o frida-inject injeta sozinho, e cada
+ * processo Frida a menos é um reload da política a menos (era o que derrubava o
+ * system_server da central no boot).
  */
 public class FridaUtils {
     private static final String TAG = "FridaUtils";
 
-    public static final String FRIDA_SERVER_PATH   = "/data/local/tmp/fridaserver";
     public static final String FRIDA_INJECTOR_PATH = "/data/local/tmp/fridainjector";
+    // Deixado pelas versoes ate 2.31.x, que subiam um frida-server: e morto e apagado
+    // na primeira injecao, senao ficava rodando ate o proximo boot.
+    private static final String LEGACY_SERVER_PATH = "/data/local/tmp/fridaserver";
     public static final String SCRIPT_PATH         = "/data/local/tmp/com_android_systemui.js";
     private static final String TARGET_PROCESS     = "com.android.systemui";
 
@@ -42,37 +47,26 @@ public class FridaUtils {
     /** Abaixo disso o arquivo em res/raw é um placeholder, não o binário real. */
     private static final long MIN_REAL_BINARY_BYTES = 100_000L;
 
-    /** true se os binários reais do Frida estão embutidos neste APK. */
+    /** true se o binário real do Frida está embutido neste APK. */
     public static boolean fridaToolsEmbedded() {
         try {
-            return rawResourceSize(R.raw.fridaserver) > MIN_REAL_BINARY_BYTES
-                    && rawResourceSize(R.raw.fridainject) > MIN_REAL_BINARY_BYTES;
+            return rawResourceSize(R.raw.fridainject) > MIN_REAL_BINARY_BYTES;
         } catch (Exception e) {
             return false;
         }
     }
 
-    /** Extrai binários+script, sobe o fridaserver e injeta o hook no SystemUI. Retorna msg de status. */
+    /** Extrai injetor+script e injeta o hook no SystemUI. Retorna msg de status. */
     public static String startAndInject() {
         if (!Shizuku.pingBinder()) return "Shizuku indisponível";
         if (!fridaToolsEmbedded())
             return "Binários do Frida ausentes neste APK (placeholder). Use o APK 'fat/test'.";
         try {
-            if (!extract(R.raw.fridaserver, FRIDA_SERVER_PATH)) return "Falha ao extrair fridaserver";
             if (!extract(R.raw.fridainject, FRIDA_INJECTOR_PATH)) return "Falha ao extrair fridainjector";
             if (!extract(R.raw.com_android_systemui, SCRIPT_PATH)) return "Falha ao extrair script";
 
             IShizukuService svc = IShizukuService.Stub.asInterface(Shizuku.getBinder());
-            svc.newProcess(new String[]{"setenforce", "0"}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_SERVER_PATH}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_INJECTOR_PATH}, null, null).waitFor();
-
-            String running = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", "fridaserver"}).trim();
-            if (running.isEmpty()) {
-                svc.newProcess(new String[]{"/bin/sh", "-c",
-                        "setsid " + FRIDA_SERVER_PATH + " >/dev/null 2>&1 < /dev/null &"}, null, null).waitFor();
-                Thread.sleep(1500);
-            }
+            prepareInjector(svc);
 
             String pid = ShizukuUtils.runCommandAndGetOutput(new String[]{"sh", "-c",
                     "ps -A | grep ' " + TARGET_PROCESS + "' | awk '{print $2}'"}).trim();
@@ -107,22 +101,12 @@ public class FridaUtils {
         if (!fridaToolsEmbedded())
             return "Binários do Frida ausentes neste APK (placeholder). Use o APK 'fat/test'.";
         try {
-            if (!extract(R.raw.fridaserver, FRIDA_SERVER_PATH)) return "Falha ao extrair fridaserver";
             if (!extract(R.raw.fridainject, FRIDA_INJECTOR_PATH)) return "Falha ao extrair fridainjector";
             if (!extract(R.raw.com_beantechs_launcher_weather, LAUNCHER_SCRIPT_PATH))
                 return "Falha ao extrair script";
 
             IShizukuService svc = IShizukuService.Stub.asInterface(Shizuku.getBinder());
-            svc.newProcess(new String[]{"setenforce", "0"}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_SERVER_PATH}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_INJECTOR_PATH}, null, null).waitFor();
-
-            String running = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", "fridaserver"}).trim();
-            if (running.isEmpty()) {
-                svc.newProcess(new String[]{"/bin/sh", "-c",
-                        "setsid " + FRIDA_SERVER_PATH + " >/dev/null 2>&1 < /dev/null &"}, null, null).waitFor();
-                Thread.sleep(1500);
-            }
+            prepareInjector(svc);
 
             String pid = launcherPid();
             if (pid.isEmpty()) {
@@ -160,22 +144,12 @@ public class FridaUtils {
         if (!fridaToolsEmbedded())
             return "Binários do Frida ausentes neste APK (placeholder). Use o APK 'fat/test'.";
         try {
-            if (!extract(R.raw.fridaserver, FRIDA_SERVER_PATH)) return "Falha ao extrair fridaserver";
             if (!extract(R.raw.fridainject, FRIDA_INJECTOR_PATH)) return "Falha ao extrair fridainjector";
             if (!extract(R.raw.com_beantechs_mediacenter_cp, MEDIA_CP_SCRIPT_PATH))
                 return "Falha ao extrair script";
 
             IShizukuService svc = IShizukuService.Stub.asInterface(Shizuku.getBinder());
-            svc.newProcess(new String[]{"setenforce", "0"}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_SERVER_PATH}, null, null).waitFor();
-            svc.newProcess(new String[]{"chmod", "755", FRIDA_INJECTOR_PATH}, null, null).waitFor();
-
-            String running = ShizukuUtils.runCommandAndGetOutput(new String[]{"pidof", "fridaserver"}).trim();
-            if (running.isEmpty()) {
-                svc.newProcess(new String[]{"/bin/sh", "-c",
-                        "setsid " + FRIDA_SERVER_PATH + " >/dev/null 2>&1 < /dev/null &"}, null, null).waitFor();
-                Thread.sleep(1500);
-            }
+            prepareInjector(svc);
 
             String pid = firstPid(MEDIACENTER_PROCESS);
             if (pid.isEmpty()) {
@@ -440,7 +414,7 @@ public class FridaUtils {
         }
     }
 
-    /** Encerra fridaserver/fridainjector. O hook some quando o SystemUI reinicia. */
+    /** Encerra os injetores (e um fridaserver antigo, se sobrou). O hook some quando o SystemUI reinicia. */
     public static String stop() {
         try {
             ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-f", "fridainjector"});
@@ -449,6 +423,20 @@ public class FridaUtils {
         } catch (Exception e) {
             return "Erro ao encerrar: " + e.getMessage();
         }
+    }
+
+    /**
+     * Permissive + permissao do injetor + limpeza do frida-server antigo, num shell so.
+     * Sem o patch do SELinux no binario, o permissive e o que deixa o alvo mapear o
+     * agente. `kill $(pidof ...)` e nao `pkill -f`: o -f casaria com este proprio shell,
+     * que tem o nome do server na linha de comando.
+     */
+    private static void prepareInjector(IShizukuService svc) throws Exception {
+        svc.newProcess(new String[]{"/bin/sh", "-c",
+                "setenforce 0; chmod 755 " + FRIDA_INJECTOR_PATH
+                        + "; p=$(pidof fridaserver); [ -n \"$p\" ] && kill $p"
+                        + "; rm -f " + LEGACY_SERVER_PATH},
+                null, null).waitFor();
     }
 
     private static long rawResourceSize(int resId) throws Exception {
