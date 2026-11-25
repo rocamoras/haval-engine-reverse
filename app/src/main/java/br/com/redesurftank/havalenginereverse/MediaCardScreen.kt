@@ -7,12 +7,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.redesurftank.havalenginereverse.overlay.MediaCardOverlay
 import br.com.redesurftank.havalenginereverse.utils.FridaUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -139,6 +142,8 @@ fun MediaCardTab() {
                 "Requer o APK fat (Frida) + Shizuku ativo.",
             color = Color(0xFF90A4AE), fontSize = 11.sp
         )
+
+        OverlaySpikeCard()
 
         // ── Card: as duas opções que você pediu ──────────────────────────
         McCard {
@@ -306,6 +311,105 @@ fun MediaCardTab() {
                 Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
+    }
+}
+
+/**
+ * SPIKE — cards por overlay, sem Frida (overlay/MediaCardOverlay.kt).
+ * Liga, calibra pela hierarquia real da mídia (uiautomator) e mostra os tempos
+ * medidos desde o boot. Para medir o boot de verdade: liga, calibra, reinicia a
+ * central, abre a mídia e volta aqui.
+ */
+@Composable
+private fun OverlaySpikeCard() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val on by MediaCardOverlay.enabled.collectAsState()
+    val status by MediaCardOverlay.status.collectAsState()
+    val rect by MediaCardOverlay.rect.collectAsState()
+    val timings by MediaCardOverlay.timings.collectAsState()
+    val lastBoot by MediaCardOverlay.lastBoot.collectAsState()
+    val log by MediaCardOverlay.log.collectAsState()
+    val forced by MediaCardOverlay.forceVisible.collectAsState()
+    var busy by remember { mutableStateOf(false) }
+    var rectText by remember(rect) { mutableStateOf(rect.toString()) }
+    var result by remember { mutableStateOf("") }
+
+    McCard {
+        Text("Spike · cards por overlay (sem Frida)", color = Color(0xFFFFD54F), fontSize = 12.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Text(
+            "Uma janela nossa (Compose) cobre a fileira de mídia online só enquanto a " +
+                "MediaCenterActivity está no topo. Nada é injetado no app do OEM. Topo lido por " +
+                "ITaskStackListener + getTasks via Shizuku. Os cards abrem a PWA por npwas://.",
+            color = Color(0xFF90A4AE), fontSize = 10.sp
+        )
+        Text(
+            (if (on) "● ligado" else "○ desligado") + " · " + status,
+            color = if (on) Color(0xFF81C784) else Color(0xFF90A4AE),
+            fontSize = 11.sp, fontFamily = FontFamily.Monospace
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            McButton(if (on) "desligar spike" else "ligar spike", !busy,
+                if (on) Color(0xFF455A64) else Color(0xFF2E7D32), Modifier.weight(1f)) {
+                MediaCardOverlay.setEnabled(ctx, !on)
+            }
+            McButton("calibrar (abre a mídia)", !busy && on, Color(0xFF0277BD), Modifier.weight(1f)) {
+                busy = true; result = "calibrando…"
+                scope.launch {
+                    result = withContext(Dispatchers.IO) { MediaCardOverlay.calibrate() }
+                    busy = false
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            McButton(if (forced) "parar de forçar" else "forçar visível (teste)", on, Color(0xFF6D4C41),
+                Modifier.weight(1f)) {
+                MediaCardOverlay.setForceVisible(!forced)
+            }
+            McButton("abrir mídia", !busy, Color(0xFF00695C), Modifier.weight(1f)) {
+                scope.launch { result = withContext(Dispatchers.IO) { FridaUtils.openMediaCenter() } }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = rectText, onValueChange = { rectText = it },
+                label = { Text("x,y,largura,altura (px de tela)", fontSize = 10.sp) },
+                singleLine = true, modifier = Modifier.weight(1f),
+                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFE0E0E0))
+            )
+            McButton("aplicar", true, Color(0xFF6A1B9A), Modifier.width(110.dp)) {
+                val r = MediaCardOverlay.Rect.parse(rectText)
+                if (r == null) result = "retângulo inválido: use x,y,w,h"
+                else { MediaCardOverlay.setRect(r); result = "retângulo $r" }
+            }
+        }
+        if (result.isNotEmpty()) Text(result, color = Color(0xFFB0BEC5), fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace)
+
+        Text("Tempos (desde o boot)", color = Color(0xFF80CBC4), fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        if (timings.isEmpty()) Text("— ligue o spike —", color = Color(0xFF3A3A4E), fontSize = 10.sp)
+        else timings.forEach {
+            Text(it, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        if (lastBoot.isNotEmpty()) {
+            Text("Último boot medido", color = Color(0xFF80CBC4), fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(lastBoot, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        Text("Log do spike", color = Color(0xFF80CBC4), fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        log.take(25).forEach {
+            Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        Text(
+            "Medir o boot: ligue, calibre, reinicie a central e abra a mídia. \"cards visíveis " +
+                "(1ª vez)\" é o número a comparar com o Frida; \"evento→visível\" é o atraso " +
+                "entre a troca de tela e os cards aparecerem.",
+            color = Color(0xFF546E7A), fontSize = 10.sp
+        )
     }
 }
 

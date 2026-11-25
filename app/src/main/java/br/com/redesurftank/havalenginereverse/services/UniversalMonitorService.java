@@ -1087,6 +1087,14 @@ public class UniversalMonitorService extends Service implements Shizuku.OnBinder
         } catch (Exception e) {
             Log.w(TAG, "onCreate: prefs indisponíveis (boot bloqueado?), restauração adiada: " + e.getMessage());
         }
+
+        // Spike: cards da mídia por overlay, sem Frida. Usa prefs device-protected,
+        // então sobe também no LOCKED_BOOT_COMPLETED. No-op se o spike estiver desligado.
+        try {
+            br.com.redesurftank.havalenginereverse.overlay.MediaCardOverlay.restoreOnBoot(this);
+        } catch (Throwable t) {
+            Log.e(TAG, "MediaCardOverlay.restoreOnBoot falhou: " + t.getMessage(), t);
+        }
     }
 
     /**

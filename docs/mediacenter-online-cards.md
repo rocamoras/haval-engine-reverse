@@ -564,3 +564,46 @@ Guarda contra repetir isso: autoteste no start da injeção exercitando `buildAr
 `resId`, `widgetText`, `realProviderId` e `resolveProvisioned`. Loga
 `autoteste dos helpers: OK` ou `autoteste dos helpers FALHOU -> <quais>` na hora da injeção, em
 vez de a falha só aparecer quando alguém clica numa opção.
+
+## 17. Spike: cards por overlay, sem Frida (v2.32.0, NÃO testado no carro)
+
+Ideia tirada do `haval-bottom-bar` (v1.21.1), que desenha a barra dele como janela
+`TYPE_APPLICATION_OVERLAY` em vez de mexer no app do OEM. Aplicado aqui: em vez de injetar no
+`com.beantechs.mediacenter`, o nosso processo põe uma janela Compose **em cima** do
+`HorizontalScrollView` da fileira e só a deixa visível enquanto a `MediaCenterActivity` está no topo.
+Como o layout é todo ancorado no topo com margem fixa (§11), a fileira não se move e um fundo opaco
+cobre o Deezer sem tocar no processo do OEM.
+
+Código: `overlay/MediaCardOverlay.kt` (janela, cards, calibração, medição) e
+`overlay/TaskTopWatcher.kt` (quem está no topo). Controles no card amarelo do topo da aba Mídia.
+Sobe sozinho no `onCreate` do `UniversalMonitorService` quando ligado (prefs device-protected, então
+vale no `LOCKED_BOOT_COMPLETED`).
+
+Peças:
+
+| peça | como |
+|---|---|
+| permissão de overlay | `appops set <pkg> SYSTEM_ALERT_WINDOW allow` pelo Shizuku, uma vez; persiste, então no boot seguinte a janela sobe antes do Shizuku |
+| janela | sempre adicionada; escondida = `alpha 0` + `FLAG_NOT_TOUCHABLE`; mostrar = um `updateViewLayout`, sem compor nada na hora |
+| topo (evento) | `ITaskStackListener` registrado no `IActivityManager` pelo Shizuku. O listener é um `Binder` cru: qualquer transação = "a pilha mudou" |
+| topo (leitura) | `IActivityManager.getTasks(1)` por binder; se falhar, `dumpsys activity activities` |
+| rede de segurança | poll de 1,5 s (300 ms se o listener for recusado) |
+| posição | **calibrar**: abre a mídia, `uiautomator dump` (uid de shell) e lê os bounds de `id/horizontalScrollView`. Ajuste manual `x,y,w,h` na aba |
+| clique | `Intent(VIEW, npwas://…)` com `setPackage(h5.ui)` direto do nosso processo (§9); fallback `am start` |
+
+O que medir no carro (painel "Tempos", tudo em `elapsedRealtime`, ou seja desde o boot):
+
+1. Ligar o spike, **calibrar** e conferir com "forçar visível" que os cards caem exatamente sobre a fileira.
+2. Desligar o forçar, abrir e fechar a mídia algumas vezes: anotar `evento→visível` (mediana/pior),
+   `detecção:` (se o listener registrou) e `leitura do topo:` (se o `getTasks` funcionou como shell).
+3. Reiniciar a central, abrir a mídia assim que der e voltar à aba: "Último boot medido" traz
+   `serviço/start`, `janela adicionada`, `1º frame (invisível)`, `shizuku pronto`, `watcher pronto`,
+   `mídia no topo (1ª vez)` e `cards visíveis (1ª vez)`.
+
+Perguntas que o teste responde:
+
+- O shell do Shizuku consegue `registerTaskStackListener` (exige `MANAGE_ACTIVITY_STACKS`) e
+  `getTasks` com tasks de outros apps (exige `REAL_GET_TASKS`)? Se não, a detecção cai para poll.
+- O overlay aparece antes, junto ou depois da animação de abertura da mídia? (olho humano)
+- Diálogos da própria mídia ficam **por baixo** do overlay (esperado, é limitação do método).
+- `cards visíveis (1ª vez)` versus o tempo até a injeção do Frida estar pronta no mesmo boot.
