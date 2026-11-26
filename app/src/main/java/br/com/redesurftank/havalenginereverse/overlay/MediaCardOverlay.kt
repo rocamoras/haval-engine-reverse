@@ -190,7 +190,7 @@ object MediaCardOverlay {
     private var view: ComposeView? = null
     private var lp: WindowManager.LayoutParams? = null
     private var owner: OverlayOwner? = null
-    private var watcher: TaskTopWatcher? = null
+    private var watcher: TopWatcher? = null
     private var mediaOnTop = false
     private var visible = false
 
@@ -232,7 +232,21 @@ object MediaCardOverlay {
         } else {
             log("sem permissão de overlay ainda; concedo quando o Shizuku chegar")
         }
+        // Mesmo raciocínio para saber quem está no topo: com o appop GET_USAGE_STATS
+        // já concedido, a detecção não espera o Shizuku (era o gargalo da v2.32.0).
+        if (UsageTopWatcher.allowed(appCtx!!)) startUsageWatcher()
+        else log("sem GET_USAGE_STATS ainda; concedo quando o Shizuku chegar")
         Shizuku.addBinderReceivedListenerSticky(binderListener)
+    }
+
+    @Synchronized
+    private fun startUsageWatcher() {
+        if (watcher is UsageTopWatcher) return
+        val ctx = appCtx ?: return
+        watcher?.quit()
+        watcher = UsageTopWatcher(ctx, ::onTopChanged, ::log) { mark("usagestats respondendo") }
+            .also { it.start() }
+        mark("watcher pronto")
     }
 
     @Synchronized
@@ -268,12 +282,24 @@ object MediaCardOverlay {
             log("appop SYSTEM_ALERT_WINDOW concedido: ${Settings.canDrawOverlays(ctx)}")
             main.post { addWindow() }
         }
-        // Um binder novo do Shizuku (servidor reiniciado) invalida o IActivityManager e o
-        // listener do watcher anterior: recria em vez de reaproveitar.
+        if (!UsageTopWatcher.allowed(ctx)) {
+            ShizukuUtils.runCommandAndGetOutput(
+                arrayOf("appops", "set", ctx.packageName, "GET_USAGE_STATS", "allow"))
+            log("appop GET_USAGE_STATS concedido: ${UsageTopWatcher.allowed(ctx)}")
+        }
         synchronized(this) {
-            watcher?.quit()
-            watcher = TaskTopWatcher(::onTopChanged, ::log).also { it.start() }
-            mark("watcher pronto")
+            when {
+                // Caminho normal: detecção sem Shizuku, já rodando ou liberada agora.
+                watcher is UsageTopWatcher -> Unit
+                UsageTopWatcher.allowed(ctx) -> startUsageWatcher()
+                // Plano B: appop recusado. Um binder novo do Shizuku invalida o
+                // IActivityManager e o listener anteriores, então recria.
+                else -> {
+                    watcher?.quit()
+                    watcher = TaskTopWatcher(::onTopChanged, ::log).also { it.start() }
+                    mark("watcher pronto")
+                }
+            }
         }
     }
 

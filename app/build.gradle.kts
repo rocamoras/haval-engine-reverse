@@ -15,8 +15,8 @@ android {
         applicationId = "br.com.redesurftank.havalenginereverse"
         minSdk = 28
         targetSdk = 28
-        versionCode = 63
-        versionName = "2.32.0"
+        versionCode = 64
+        versionName = "2.33.0"
     }
 
     signingConfigs {

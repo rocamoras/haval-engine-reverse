@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Spike dos cards por overlay: topo lido pelo UsageStats. Liberado por
+         `appops set <pkg> GET_USAGE_STATS allow` (Shizuku, uma vez; persiste). -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <application
         android:name="br.com.redesurftank.havalenginereverse.App"

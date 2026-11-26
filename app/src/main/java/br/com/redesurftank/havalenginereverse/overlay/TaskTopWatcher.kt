@@ -36,7 +36,7 @@ import rikka.shizuku.SystemServiceHelper
 class TaskTopWatcher(
     private val onTop: (component: ComponentName?, source: String, eventAt: Long) -> Unit,
     private val log: (String) -> Unit
-) {
+) : TopWatcher {
     companion object {
         private const val TAG = "TaskTopWatcher"
         private const val LISTENER_DESCRIPTOR = "android.app.ITaskStackListener"
@@ -54,15 +54,15 @@ class TaskTopWatcher(
     private var listenerProxy: Any? = null
 
     /** Como o topo está sendo lido — vai para o painel de medição. */
-    @Volatile var mode: String = "parado"
+    @Volatile override var mode: String = "parado"
         private set
-    @Volatile var queryMode: String = "?"
+    @Volatile override var queryMode: String = "?"
         private set
 
     private var lastComponent: ComponentName? = null
     private var reportedOnce = false
 
-    fun start() {
+    override fun start() {
         if (running) return
         running = true
         handler.post {
@@ -87,13 +87,13 @@ class TaskTopWatcher(
         handler.post { unregisterListener() }
     }
 
-    fun quit() {
+    override fun quit() {
         stop()
         handler.post { thread.quitSafely() }
     }
 
     /** Força uma releitura agora (ex.: depois de calibrar). */
-    fun poke(reason: String) {
+    override fun poke(reason: String) {
         if (!running) return
         val at = SystemClock.elapsedRealtime()
         handler.post { check(reason, at) }

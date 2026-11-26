@@ -340,8 +340,9 @@ private fun OverlaySpikeCard() {
             fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
         Text(
             "Uma janela nossa (Compose) cobre a fileira de mídia online só enquanto a " +
-                "MediaCenterActivity está no topo. Nada é injetado no app do OEM. Topo lido por " +
-                "ITaskStackListener + getTasks via Shizuku. Os cards abrem a PWA por npwas://.",
+                "MediaCenterActivity está no topo. Nada é injetado no app do OEM. Topo lido pelo " +
+                "UsageStats, sem esperar o Shizuku (ele só concede os appops na 1ª vez; " +
+                "ITaskStackListener via Shizuku é o plano B). Os cards abrem a PWA por npwas://.",
             color = Color(0xFF90A4AE), fontSize = 10.sp
         )
         Text(

@@ -607,3 +607,29 @@ Perguntas que o teste responde:
 - O overlay aparece antes, junto ou depois da animação de abertura da mídia? (olho humano)
 - Diálogos da própria mídia ficam **por baixo** do overlay (esperado, é limitação do método).
 - `cards visíveis (1ª vez)` versus o tempo até a injeção do Frida estar pronta no mesmo boot.
+
+## 18. Resultado do spike no carro e detecção sem Shizuku (v2.33.0)
+
+Teste da v2.32.0 no carro: os cards por overlay **funcionaram**, mas apareceram no boot **no mesmo
+tempo** dos cards do Frida. O motivo é estrutural. A janela fica pronta cedo (não depende do
+Shizuku), mas só podia ficar visível depois de saber que a mídia estava no topo, e o
+`ITaskStackListener`/`getTasks` passam pelo Shizuku. Neste app o Shizuku não é subido por nós
+(UID > 10999): esperamos o binder que o climate-control sobe por telnet. Overlay e Frida ficavam
+presos na mesma espera.
+
+O AutoPanel (`haval-bottom-bar`) não tem esse problema porque a barra dele não depende de detectar
+nada. No `startDeferredInit` ele dispara o próprio `ShizukuBootstrapper` sem esperar e já chama
+`showBottomBar`.
+
+Correção: `overlay/UsageTopWatcher.kt` lê o topo pelo `UsageStatsManager.queryEvents`
+(`MOVE_TO_FOREGROUND`, poll de 250 ms) com o appop `GET_USAGE_STATS`. O appop é concedido uma vez
+pelo Shizuku e persiste, igual ao `SYSTEM_ALERT_WINDOW`. Do boot seguinte em diante, janela e
+detecção sobem sem Shizuku. O watcher por Shizuku (§17) virou plano B, usado só se o appop for
+recusado. Bônus: o evento traz o horário real do resume, então `evento→visível` passa a medir a
+partir da troca de tela de verdade.
+
+Como validar: instalar, ligar o spike com o Shizuku de pé (concede os dois appops), reiniciar a
+central e abrir a mídia. Em "Último boot medido", `cards visíveis (1ª vez)` deve ficar perto de
+`mídia no topo (1ª vez)` e **antes** de `shizuku pronto`. A detecção deve aparecer como
+`UsageStats (sem Shizuku)`. Limite: antes do desbloqueio do usuário o UsageStats não responde
+(`sem resposta (usuário ainda bloqueado?)` no painel).
