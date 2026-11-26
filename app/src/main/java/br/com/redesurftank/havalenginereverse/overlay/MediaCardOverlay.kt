@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -15,30 +16,7 @@ import android.view.Choreographer
 import android.view.Gravity
 import android.view.ViewTreeObserver
 import android.view.WindowManager
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -52,27 +30,30 @@ import br.com.redesurftank.havalenginereverse.utils.ShizukuUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * SPIKE — cards da fileira de mídia online desenhados por OVERLAY, sem Frida.
+ * Cards da fileira de mídia online desenhados por OVERLAY, sem Frida (modo padrão
+ * desde a v2.34.0; spike nas v2.32/2.33, docs/mediacenter-online-cards.md §17-§19).
  *
- * Em vez de injetar no processo com.beantechs.mediacenter e remontar as views em
- * JS (docs/HANDOFF-cards-midia-online.md), o nosso processo põe uma janela
- * TYPE_APPLICATION_OVERLAY, em Compose, exatamente em cima do HorizontalScrollView
- * da fileira, e só a deixa visível enquanto a MediaCenterActivity está no topo.
- * O layout da MediaCenter é todo ancorado no topo com margem fixa, então a posição
- * da fileira não muda: um fundo opaco cobre o Deezer sem mexer no app do OEM.
+ * O nosso processo põe uma janela TYPE_APPLICATION_OVERLAY, em Compose, exatamente
+ * em cima do HorizontalScrollView da fileira, e só a deixa visível enquanto a
+ * MediaCenterActivity está no topo. O layout da MediaCenter é todo ancorado no topo
+ * com margem fixa, então a posição não muda: um fundo opaco, na cor amostrada da
+ * própria tela, cobre o Deezer sem mexer no app do OEM.
  *
- * O que o spike mede (tudo em SystemClock.elapsedRealtime, ou seja, desde o boot):
- * início do serviço, janela adicionada, primeiro frame (pré-aquecido, invisível),
- * Shizuku pronto, watcher pronto, primeira vez que a mídia aparece no topo e
- * primeira vez que os cards ficam visíveis — além da latência evento→visível de
- * cada aparição.
+ * Nada no caminho do boot depende do Shizuku: a janela usa o appop
+ * SYSTEM_ALERT_WINDOW e o topo vem do UsageStats (appop GET_USAGE_STATS), ambos
+ * concedidos uma vez pelo Shizuku e persistentes. O Shizuku só entra para conceder
+ * os appops, calibrar e alimentar o card de temperatura (que mostra o último valor
+ * salvo até lá).
  *
  * A janela fica sempre adicionada; esconder = alpha 0 + FLAG_NOT_TOUCHABLE. Assim
  * mostrar é só um updateViewLayout, sem compor nem desenhar nada na hora.
@@ -87,23 +68,33 @@ object MediaCardOverlay {
     private const val ID_TITLE = "$MEDIA_PKG:id/online_music"
     private const val DUMP_PATH = "/data/local/tmp/mc_overlay_ui.xml"
 
+    const val KEY_OUTSIDE = "car.basic.outside_temp"
+    const val KEY_INSIDE = "car.basic.inside_temp"
+
+    // O nome do arquivo ficou do spike: mantém ligado/calibrado quem já usava.
     private const val PREFS = "mc_overlay_spike"
     private const val K_ENABLED = "enabled"
     private const val K_RECT = "rect"
+    private const val K_TITLE_RECT = "title_rect"
+    private const val K_CALIBRATED = "calibrated"
+    private const val K_BG = "bg_color"
+    private const val K_MODE = "mode"
+    private const val K_ITEMS = "items"
+    private const val K_T_OUT = "temp_out"
+    private const val K_T_IN = "temp_in"
     private const val K_LAST_BOOT = "last_boot_report"
 
-    data class Card(val label: String, val sub: String, val accent: Long, val url: String)
-
-    /** Os cards do spike: abrem a PWA direto no content shell, sem provisionamento. */
-    val CARDS = listOf(
-        Card("TuneIn", "rádio", 0xFF14D8CC, "npwas://tunein.com/radio/music/"),
-        Card("Radioline", "rádio", 0xFFFF7043, "npwas://access-bt-gwm-9zcb4r.radioline.co/"),
-        Card("Deezer", "música", 0xFFA238FF, "npwas://ver.netrange.com/twine4car.deezer/production/v1/index.html"),
-        Card("YouTube", "vídeo", 0xFFFF0033, "npwas://www.youtube.com/?app=desktop&persist_app=1&ua=default")
-    )
+    /** CARDS = a fileira vira os nossos cards; HIDE = título e fileira somem. */
+    enum class Mode { CARDS, HIDE }
 
     data class Rect(val x: Int, val y: Int, val w: Int, val h: Int) {
         override fun toString() = "$x,$y,$w,$h"
+
+        fun union(o: Rect): Rect {
+            val l = minOf(x, o.x); val t = minOf(y, o.y)
+            val r = maxOf(x + w, o.x + o.w); val b = maxOf(y + h, o.y + o.h)
+            return Rect(l, t, r - l, b - t)
+        }
 
         companion object {
             fun parse(s: String?): Rect? {
@@ -116,8 +107,10 @@ object MediaCardOverlay {
 
     /** Placeholder até calibrar: fileira do layout-1792x1080 (margens 188/164), achatada. */
     private val DEFAULT_RECT = Rect(316, 164, 1500, 324)
+    private const val DEFAULT_BG = 0xFF0E1116.toInt()
+    val DEFAULT_ITEMS = listOf("tunein")
 
-    // ── Estado exposto para a aba ─────────────────────────────────────────
+    // ── Estado exposto para a aba e para a UI da janela ───────────────────
 
     private val _enabled = MutableStateFlow(false)
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -127,6 +120,25 @@ object MediaCardOverlay {
 
     private val _rect = MutableStateFlow(DEFAULT_RECT)
     val rect: StateFlow<Rect> = _rect.asStateFlow()
+
+    private val _titleRect = MutableStateFlow<Rect?>(null)
+    val titleRect: StateFlow<Rect?> = _titleRect.asStateFlow()
+
+    private val _calibrated = MutableStateFlow(false)
+    val calibrated: StateFlow<Boolean> = _calibrated.asStateFlow()
+
+    private val _bgColor = MutableStateFlow(DEFAULT_BG)
+    val bgColor: StateFlow<Int> = _bgColor.asStateFlow()
+
+    private val _mode = MutableStateFlow(Mode.CARDS)
+    val mode: StateFlow<Mode> = _mode.asStateFlow()
+
+    private val _items = MutableStateFlow(DEFAULT_ITEMS)
+    val items: StateFlow<List<String>> = _items.asStateFlow()
+
+    /** (externa, interna) como chegam do carro; null = ainda sem valor. */
+    private val _temps = MutableStateFlow<Pair<String?, String?>>(null to null)
+    val temps: StateFlow<Pair<String?, String?>> = _temps.asStateFlow()
 
     private val _timings = MutableStateFlow<List<String>>(emptyList())
     val timings: StateFlow<List<String>> = _timings.asStateFlow()
@@ -194,25 +206,65 @@ object MediaCardOverlay {
     private var mediaOnTop = false
     private var visible = false
 
-    private fun prefs(ctx: Context) =
+    private fun prefs() =
         App.getDeviceProtectedContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Lê a configuração salva. Barato e idempotente: a aba chama ao abrir. */
+    @JvmStatic
+    fun load() {
+        val p = prefs()
+        _rect.value = Rect.parse(p.getString(K_RECT, null)) ?: DEFAULT_RECT
+        _titleRect.value = Rect.parse(p.getString(K_TITLE_RECT, null))
+        _calibrated.value = p.getBoolean(K_CALIBRATED, false)
+        _bgColor.value = p.getInt(K_BG, DEFAULT_BG)
+        _mode.value = if (p.getString(K_MODE, "") == Mode.HIDE.name) Mode.HIDE else Mode.CARDS
+        _items.value = p.getString(K_ITEMS, null)?.split(",")?.map { it.trim() }
+            ?.filter { CardCatalog.byId(it) != null } ?: DEFAULT_ITEMS
+        _temps.value = p.getString(K_T_OUT, null) to p.getString(K_T_IN, null)
+        _lastBoot.value = p.getString(K_LAST_BOOT, "") ?: ""
+    }
 
     /**
      * Chamado no onCreate do UniversalMonitorService (que sobe no BOOT_COMPLETED e no
-     * LOCKED_BOOT_COMPLETED). Só faz algo se o spike estiver ligado.
+     * LOCKED_BOOT_COMPLETED). Só faz algo se o overlay estiver ligado.
      */
     @JvmStatic
     fun restoreOnBoot(ctx: Context) {
-        val p = prefs(ctx)
-        _rect.value = Rect.parse(p.getString(K_RECT, null)) ?: DEFAULT_RECT
-        _lastBoot.value = p.getString(K_LAST_BOOT, "") ?: ""
-        if (!p.getBoolean(K_ENABLED, false)) return
+        load()
+        if (!prefs().getBoolean(K_ENABLED, false)) return
         start(ctx)
     }
 
     fun setEnabled(ctx: Context, on: Boolean) {
-        prefs(ctx).edit().putBoolean(K_ENABLED, on).apply()
+        prefs().edit().putBoolean(K_ENABLED, on).apply()
         if (on) start(ctx) else stop()
+    }
+
+    /** Troca o que a janela mostra. Vale na hora, sem reabrir a mídia. */
+    fun setConfig(mode: Mode, items: List<String>) {
+        val clean = items.filter { CardCatalog.byId(it) != null }.distinct()
+        _mode.value = mode
+        _items.value = clean
+        prefs().edit().putString(K_MODE, mode.name).putString(K_ITEMS, clean.joinToString(",")).apply()
+        log("config: ${mode.name} ${if (mode == Mode.CARDS) clean.toString() else ""}")
+        applyWindowRect()
+    }
+
+    /** Valores do carro, vindos do EngineReverseStateHolder (só existem com Shizuku). */
+    @JvmStatic
+    fun onVehicleValue(key: String, value: String?) {
+        if (value.isNullOrEmpty()) return
+        val cur = _temps.value
+        when (key) {
+            KEY_OUTSIDE -> if (cur.first != value) {
+                _temps.value = value to cur.second
+                try { prefs().edit().putString(K_T_OUT, value).apply() } catch (_: Throwable) {}
+            }
+            KEY_INSIDE -> if (cur.second != value) {
+                _temps.value = cur.first to value
+                try { prefs().edit().putString(K_T_IN, value).apply() } catch (_: Throwable) {}
+            }
+        }
     }
 
     @Synchronized
@@ -256,7 +308,7 @@ object MediaCardOverlay {
         watcher?.quit(); watcher = null
         main.post { removeWindow() }
         _status.value = "desligado"
-        log("spike desligado")
+        log("overlay desligado")
     }
 
     private val binderListener = Shizuku.OnBinderReceivedListener {
@@ -271,7 +323,7 @@ object MediaCardOverlay {
         if (!granted) {
             // Quem pede a permissão é o UniversalMonitorService; aqui só esperamos.
             if (attempt < 30) main.postDelayed({ Thread { onShizukuReady(attempt + 1) }.start() }, 1000)
-            else log("Shizuku sem permissão depois de 30s; watcher não sobe")
+            else log("Shizuku sem permissão depois de 30s; appops não concedidos")
             return
         }
         mark("shizuku pronto")
@@ -321,12 +373,19 @@ object MediaCardOverlay {
 
     // ── Janela ────────────────────────────────────────────────────────────
 
+    /** No modo HIDE a janela cobre título + fileira; senão só a fileira. */
+    private fun windowRect(): Rect {
+        val row = _rect.value
+        val title = _titleRect.value
+        return if (_mode.value == Mode.HIDE && title != null) row.union(title) else row
+    }
+
     private fun addWindow() {
         val ctx = appCtx ?: return
         if (view != null || !_enabled.value) return
         try {
             wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val r = _rect.value
+            val r = windowRect()
             val params = WindowManager.LayoutParams(
                 r.w, r.h,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -341,13 +400,13 @@ object MediaCardOverlay {
                 gravity = Gravity.TOP or Gravity.START
                 x = r.x; y = r.y
                 alpha = 0f
-                title = "mc-overlay-spike"
+                title = "mc-overlay-cards"
             }
             val o = OverlayOwner().also { it.create() }
             val cv = ComposeView(ctx).apply {
                 setViewTreeLifecycleOwner(o)
                 setViewTreeSavedStateRegistryOwner(o)
-                setContent { OverlayCards(CARDS) { openCard(it) } }
+                setContent { OverlayContent { openCard(it) } }
             }
             // Primeiro frame do pré-aquecimento (ainda invisível): mede quanto custa
             // compor e desenhar a UI, separado da latência de mostrar.
@@ -362,7 +421,7 @@ object MediaCardOverlay {
             o.resume()
             view = cv; lp = params; owner = o; visible = false
             mark("janela adicionada")
-            _status.value = "janela pronta (invisível) em ${_rect.value}"
+            _status.value = "janela pronta (invisível) em $r"
             applyVisibility(SystemClock.elapsedRealtime())
         } catch (t: Throwable) {
             log("addView falhou: ${t.javaClass.simpleName}: ${t.message}")
@@ -375,6 +434,17 @@ object MediaCardOverlay {
         try { wm?.removeView(v) } catch (_: Throwable) {}
         owner?.destroy()
         view = null; lp = null; owner = null; visible = false
+    }
+
+    private fun applyWindowRect() {
+        main.post {
+            val v = view ?: return@post
+            val p = lp ?: return@post
+            val r = windowRect()
+            p.x = r.x; p.y = r.y; p.width = r.w; p.height = r.h
+            try { wm?.updateViewLayout(v, p) } catch (_: Throwable) {}
+            _status.value = (if (visible) "cards VISÍVEIS em " else "janela pronta em ") + r
+        }
     }
 
     private fun applyVisibility(eventAt: Long) {
@@ -392,7 +462,7 @@ object MediaCardOverlay {
             log("updateViewLayout falhou: ${t.message}")
             return
         }
-        _status.value = if (want) "cards VISÍVEIS em ${_rect.value}" else "cards escondidos (mídia fora do topo)"
+        _status.value = if (want) "cards VISÍVEIS em ${windowRect()}" else "cards escondidos (mídia fora do topo)"
         if (!want) return
         // O alpha da janela é propriedade da surface: vale na próxima transação do
         // WM. O próximo vsync é a melhor aproximação de "apareceu" que o app tem.
@@ -409,12 +479,12 @@ object MediaCardOverlay {
         }
     }
 
-    // ── Calibração por uiautomator (sem Frida) ────────────────────────────
+    // ── Calibração (uiautomator + screencap, pelo Shizuku, uma vez) ───────
 
     /**
      * Abre a MediaCenter, tira um dump da hierarquia (uiautomator, uid de shell) e
-     * lê os bounds do HorizontalScrollView da fileira. Bloqueante: chamar fora da
-     * main thread.
+     * lê os bounds da fileira e do título; depois amostra a cor de fundo da tela em
+     * volta da fileira (screencap cru). Bloqueante: chamar fora da main thread.
      */
     fun calibrate(): String {
         if (!Shizuku.pingBinder()) return "Shizuku indisponível"
@@ -438,9 +508,21 @@ object MediaCardOverlay {
             val row = boundsOf(xml, ID_ROW)
                 ?: return "fileira ($ID_ROW) não achada no dump — a mídia estava no topo?"
             val title = boundsOf(xml, ID_TITLE)
-            setRect(row)
-            log("calibrado: fileira=$row título=${title ?: "?"}")
-            return "calibrado: fileira $row" + (title?.let { " · título $it" } ?: "")
+            val bg = sampleBackground(row)
+            val p = prefs().edit()
+                .putString(K_RECT, row.toString())
+                .putBoolean(K_CALIBRATED, true)
+            if (title != null) p.putString(K_TITLE_RECT, title.toString())
+            if (bg != null) p.putInt(K_BG, bg)
+            p.apply()
+            _rect.value = row
+            if (title != null) _titleRect.value = title
+            if (bg != null) _bgColor.value = bg
+            _calibrated.value = true
+            applyWindowRect()
+            val bgTxt = bg?.let { String.format("#%06X", it and 0xFFFFFF) } ?: "não amostrado"
+            log("calibrado: fileira=$row título=${title ?: "?"} fundo=$bgTxt")
+            return "calibrado: fileira $row" + (title?.let { " · título $it" } ?: "") + " · fundo $bgTxt"
         } catch (t: Throwable) {
             return "calibração falhou: ${t.message}"
         } finally {
@@ -457,25 +539,90 @@ object MediaCardOverlay {
         return Rect(l.toInt(), t.toInt(), r.toInt() - l.toInt(), bt.toInt() - t.toInt())
     }
 
+    /**
+     * Cor de fundo da tela da mídia em volta da fileira. `screencap` sem -p escreve
+     * um cabeçalho (largura, altura, formato; +dataspace a partir do Android 10) e os
+     * pixels RGBA crus: lemos o stdout do processo do Shizuku só até o último ponto
+     * amostrado, sem arquivo (o app não lê /data/local/tmp). Fica com a cor mais
+     * frequente entre os pontos.
+     */
+    private fun sampleBackground(row: Rect): Int? {
+        val svc = IShizukuService.Stub.asInterface(Shizuku.getBinder())
+        val proc = svc.newProcess(arrayOf("screencap"), null, null) ?: return null
+        try {
+            val input: InputStream = FileInputStream(proc.inputStream.fileDescriptor)
+            val header = ByteArray(if (Build.VERSION.SDK_INT >= 29) 16 else 12)
+            if (!readFully(input, header)) return null
+            val w = le32(header, 0); val h = le32(header, 4); val fmt = le32(header, 8)
+            if (w <= 0 || h <= 0 || fmt != 1) { log("screencap: formato $fmt ${w}x$h não suportado"); return null }
+            val midY = row.y + row.h / 2
+            val pts = listOf(
+                row.x - 24 to midY,
+                row.x + row.w + 24 to midY,
+                row.x + 40 to row.y + row.h + 10,
+                row.x + row.w / 2 to row.y + row.h + 10
+            ).filter { (x, y) -> x in 0 until w && y in 0 until h }
+                .map { (x, y) -> (y.toLong() * w + x) * 4 }
+                .sorted()
+            if (pts.isEmpty()) return null
+            val colors = ArrayList<Int>()
+            var pos = 0L
+            val px = ByteArray(4)
+            for (off in pts) {
+                skipFully(input, off - pos)
+                if (!readFully(input, px)) break
+                pos = off + 4
+                val r = px[0].toInt() and 0xFF; val g = px[1].toInt() and 0xFF; val b = px[2].toInt() and 0xFF
+                colors.add((0xFF shl 24) or (r shl 16) or (g shl 8) or b)
+            }
+            return colors.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        } catch (t: Throwable) {
+            log("amostra de fundo falhou: ${t.message}")
+            return null
+        } finally {
+            try { proc.destroy() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun le32(b: ByteArray, o: Int) =
+        (b[o].toInt() and 0xFF) or ((b[o + 1].toInt() and 0xFF) shl 8) or
+            ((b[o + 2].toInt() and 0xFF) shl 16) or ((b[o + 3].toInt() and 0xFF) shl 24)
+
+    private fun readFully(input: InputStream, buf: ByteArray): Boolean {
+        var n = 0
+        while (n < buf.size) {
+            val r = input.read(buf, n, buf.size - n)
+            if (r < 0) return false
+            n += r
+        }
+        return true
+    }
+
+    private fun skipFully(input: InputStream, count: Long) {
+        var left = count
+        val scratch = ByteArray(64 * 1024)
+        while (left > 0) {
+            val r = input.read(scratch, 0, minOf(left, scratch.size.toLong()).toInt())
+            if (r < 0) throw java.io.EOFException()
+            left -= r
+        }
+    }
+
     fun setRect(r: Rect) {
         _rect.value = r
-        prefs(App.getContext()).edit().putString(K_RECT, r.toString()).apply()
-        main.post {
-            val v = view ?: return@post
-            val p = lp ?: return@post
-            p.x = r.x; p.y = r.y; p.width = r.w; p.height = r.h
-            try { wm?.updateViewLayout(v, p) } catch (_: Throwable) {}
-            _status.value = (if (visible) "cards VISÍVEIS em " else "janela pronta em ") + r
-        }
+        prefs().edit().putString(K_RECT, r.toString()).putBoolean(K_CALIBRATED, true).apply()
+        _calibrated.value = true
+        applyWindowRect()
     }
 
     // ── Clique ────────────────────────────────────────────────────────────
 
-    private fun openCard(card: Card) {
+    private fun openCard(card: CardDef) {
         val ctx = appCtx ?: return
+        val url = card.url ?: return
         log("clique: ${card.label}")
         try {
-            val i = Intent(Intent.ACTION_VIEW, Uri.parse(card.url))
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 .setPackage(H5_UI_PKG)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(i)
@@ -483,7 +630,7 @@ object MediaCardOverlay {
             log("startActivity falhou (${t.message}); tentando am start pelo Shizuku")
             Thread {
                 ShizukuUtils.runCommandAndGetOutput(arrayOf("am", "start", "-a",
-                    "android.intent.action.VIEW", "-d", card.url, "-p", H5_UI_PKG))
+                    "android.intent.action.VIEW", "-d", url, "-p", H5_UI_PKG))
             }.start()
         }
     }
@@ -505,7 +652,7 @@ object MediaCardOverlay {
         watcher?.let { sb.append("  ").append(it.mode).append(" · ").append(it.queryMode) }
         val report = sb.toString().trimEnd()
         _lastBoot.value = report
-        try { prefs(App.getContext()).edit().putString(K_LAST_BOOT, report).apply() } catch (_: Throwable) {}
+        try { prefs().edit().putString(K_LAST_BOOT, report).apply() } catch (_: Throwable) {}
     }
 }
 
@@ -523,38 +670,4 @@ private class OverlayOwner : LifecycleOwner, SavedStateRegistryOwner {
 
     fun resume() { registry.currentState = Lifecycle.State.RESUMED }
     fun destroy() { registry.currentState = Lifecycle.State.DESTROYED }
-}
-
-@Composable
-private fun OverlayCards(cards: List<MediaCardOverlay.Card>, onClick: (MediaCardOverlay.Card) -> Unit) {
-    // Fundo opaco: cobre o ícone do OEM que está embaixo, inclusive nos vãos.
-    Box(Modifier.fillMaxSize().background(Color(0xFF0E1116))) {
-        Row(
-            Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            cards.forEach { c ->
-                Surface(
-                    modifier = Modifier.weight(1f).fillMaxHeight().clickable { onClick(c) },
-                    color = Color(0xFF1A1F29),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(2.dp, Color(c.accent).copy(alpha = 0.55f))
-                ) {
-                    Column(Modifier.fillMaxSize().padding(22.dp)) {
-                        Box(
-                            Modifier.fillMaxWidth().height(8.dp)
-                                .background(Color(c.accent), RoundedCornerShape(4.dp))
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(c.label, color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                        Text(c.sub, color = Color(0xFF9AA4B2), fontSize = 20.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Box(Modifier.align(Alignment.End)) {
-                            Text("abrir ›", color = Color(c.accent), fontSize = 20.sp)
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

@@ -633,3 +633,33 @@ central e abrir a mídia. Em "Último boot medido", `cards visíveis (1ª vez)` 
 `mídia no topo (1ª vez)` e **antes** de `shizuku pronto`. A detecção deve aparecer como
 `UsageStats (sem Shizuku)`. Limite: antes do desbloqueio do usuário o UsageStats não responde
 (`sem resposta (usuário ainda bloqueado?)` no painel).
+
+## 19. Overlay vira o modo padrão (v2.34.0)
+
+Teste da v2.33.0 no carro (25/11/2026): com a detecção por UsageStats, os cards por overlay
+apareceram **mais rápido** que os do Frida. O overlay passou a ser o modo padrão da aba Mídia.
+O Frida ficou atrás do botão "modo antigo (Frida)", sem subir no boot.
+
+O que o overlay cobre agora (mesmas opções A–D do Frida, §12):
+
+| opção | modo | o que a janela faz |
+|---|---|---|
+| A | `CARDS [tunein]` | um card TuneIn no lugar do Deezer |
+| B | `CARDS []` | só o fundo: a fileira some, o título fica |
+| C | `HIDE` | cobre título + fileira (retângulo unido, os dois vindos da calibração) |
+| D | `CARDS [temp]` | card de temperatura externa/interna |
+| montar | `CARDS [...]` | qualquer combinação do catálogo `overlay/MediaCardContent.kt` (`CardCatalog`) |
+
+- **Catálogo**: TuneIn, Radioline, Deezer, YouTube, Amazon Music, Reuters TV, CNN, Pluto TV, DAZN e
+  Temperatura. Todos abrem a PWA por `npwas://` no content shell (§9), sem depender do provisionamento.
+  ESPN, JOOX e myTuner ficaram de fora porque não há URL conhecida.
+- **Cor de fundo**: a calibração também roda `screencap` cru pelo Shizuku e amostra 4 pontos em volta da
+  fileira. O stdout é lido direto do processo, sem arquivo (o app não lê `/data/local/tmp`). O fundo da
+  janela passa a ter a cor da tela da mídia, o que faz B e C parecerem "sumir" de verdade.
+- **Temperatura sem esperar o Shizuku**: o `EngineReverseStateHolder.onEventReceived` repassa
+  `car.basic.outside_temp`/`car.basic.inside_temp` ao overlay, que guarda o último valor em prefs
+  device-protected. No boot, o card aparece com o último valor salvo e atualiza quando o Shizuku chegar.
+- A configuração muda ao vivo (Compose lê `StateFlow`): trocar a opção não reabre a mídia nem recria
+  a janela.
+
+Continua valendo a limitação: diálogos da própria mídia ficam **por baixo** do overlay.

@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.redesurftank.havalenginereverse.overlay.CardCatalog
 import br.com.redesurftank.havalenginereverse.overlay.MediaCardOverlay
 import br.com.redesurftank.havalenginereverse.utils.FridaUtils
 import kotlinx.coroutines.Dispatchers
@@ -25,13 +26,14 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Aba "Mídia" — escolhe quais ícones de mídia online aparecem no card da tela
- * principal do app de mídia OEM (com.beantechs.mediacenter).
+ * Aba "Mídia" — o que aparece na fileira de mídia online da tela principal do app
+ * de mídia OEM (com.beantechs.mediacenter). De fábrica o Brasil (country code 17)
+ * recebe só o Deezer.
  *
- * De fábrica a lista é fixa por país (persist.bean.country.code): no Brasil (17)
- * é só [551 Deezer]. Aqui o Frida hooka OnlineOsModelImpl.getMCpList() e devolve
- * a lista que você montar; a Activity é repintada sem reiniciar o app.
- * Detalhes: docs/mediacenter-online-cards.md + res/raw/com_beantechs_mediacenter_cp.js
+ * Modo padrão (v2.34.0): overlay, sem Frida — overlay/MediaCardOverlay.kt.
+ * Modo antigo: Frida hooka OnlineOsModelImpl.getMCpList() e repinta a Activity
+ * (res/raw/com_beantechs_mediacenter_cp.js), escondido atrás de um botão.
+ * Detalhes: docs/mediacenter-online-cards.md
  */
 
 /** Um CP que o loadOnlineMusicCard() sabe desenhar. */
@@ -68,6 +70,7 @@ fun MediaCardTab() {
     val selected = remember { mutableStateListOf(553) }
     var hooked by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var showFrida by remember { mutableStateOf(false) }
     var current by remember { mutableStateOf("") }
     var limitMode by remember { mutableStateOf("") }
     val log = remember { mutableStateListOf<String>() }
@@ -137,13 +140,64 @@ fun MediaCardTab() {
         Text("Card de mídia online", color = Color(0xFF4FC3F7),
             fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Escolhe quais ícones aparecem na fileira de mídia online da tela principal " +
-                "do app de mídia. De fábrica o Brasil (country code 17) recebe só o Deezer. " +
-                "Requer o APK fat (Frida) + Shizuku ativo.",
+            "Escolhe o que aparece na fileira de mídia online da tela principal do app de " +
+                "mídia. De fábrica o Brasil (country code 17) recebe só o Deezer.",
             color = Color(0xFF90A4AE), fontSize = 11.sp
         )
 
-        OverlaySpikeCard()
+        OverlayCardsSection()
+
+        // ── Card: aviso de vídeo em movimento ────────────────────────────
+        McCard {
+            Text("Aviso de vídeo em movimento", color = Color(0xFF80CBC4), fontSize = 12.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text(
+                "\"A velocidade do veículo > 0 km/h, por favor, não assista a vídeos.\" " +
+                    "Não é patch: é o modo do próprio OEM em " +
+                    "Settings.System.bean_video_limit_mode, lido ao vivo por ContentObserver. " +
+                    "Vale para o content shell (PWAs) e para o player de vídeo USB.",
+                color = Color(0xFF90A4AE), fontSize = 10.sp
+            )
+            Text(
+                "modo atual: " + when (limitMode) {
+                    "-1" -> "-1 · aviso desligado"
+                    "0" -> "0 · qualquer movimento (padrão)"
+                    "1" -> "1 · a partir de 15 km/h"
+                    "" -> "(não lido — Shizuku ativo?)"
+                    else -> limitMode
+                },
+                color = Color(0xFFB0BEC5), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+            )
+            McButton("1 · avisar só a partir de 15 km/h (recomendado)", !busy, Color(0xFF2E7D32)) {
+                setLimitMode(1, "a partir de 15 km/h")
+            }
+            McButton("0 · avisar com qualquer movimento (fábrica)", !busy, Color(0xFF37474F)) {
+                setLimitMode(0, "qualquer movimento")
+            }
+            McButton("-1 · desligar o aviso em qualquer velocidade", !busy, Color(0xFFB71C1C)) {
+                setLimitMode(-1, "desligado")
+            }
+            Text(
+                "O modo 1 tem histerese: liga o aviso em 15 km/h e libera abaixo de 12 — resolve " +
+                    "parado no trânsito e manobra, mantendo o bloqueio em movimento. O -1 libera " +
+                    "vídeo na tela do motorista a qualquer velocidade; o risco e a exposição legal " +
+                    "são seus. Tudo reversível: é só um setting.",
+                color = Color(0xFF546E7A), fontSize = 10.sp
+            )
+        }
+
+        // ── Modo antigo: Frida dentro do processo da mídia ───────────────
+        McButton(
+            if (showFrida) "esconder o modo antigo (Frida)"
+            else "modo antigo (Frida) — só se o overlay não servir",
+            true, Color(0xFF263238)
+        ) { showFrida = !showFrida }
+        if (showFrida) {
+        Text(
+            "Requer o APK fat (Frida) + Shizuku ativo e não sobe sozinho no boot. Se o overlay " +
+                "estiver ligado, ele fica por cima do que o Frida desenhar.",
+            color = Color(0xFF546E7A), fontSize = 10.sp
+        )
 
         // ── Card: as duas opções que você pediu ──────────────────────────
         McCard {
@@ -219,45 +273,6 @@ fun MediaCardTab() {
             }
         }
 
-        // ── Card: aviso de vídeo em movimento ────────────────────────────
-        McCard {
-            Text("Aviso de vídeo em movimento", color = Color(0xFF80CBC4), fontSize = 12.sp,
-                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-            Text(
-                "\"A velocidade do veículo > 0 km/h, por favor, não assista a vídeos.\" " +
-                    "Não é patch: é o modo do próprio OEM em " +
-                    "Settings.System.bean_video_limit_mode, lido ao vivo por ContentObserver. " +
-                    "Vale para o content shell (PWAs) e para o player de vídeo USB.",
-                color = Color(0xFF90A4AE), fontSize = 10.sp
-            )
-            Text(
-                "modo atual: " + when (limitMode) {
-                    "-1" -> "-1 · aviso desligado"
-                    "0" -> "0 · qualquer movimento (padrão)"
-                    "1" -> "1 · a partir de 15 km/h"
-                    "" -> "(não lido — Shizuku ativo?)"
-                    else -> limitMode
-                },
-                color = Color(0xFFB0BEC5), fontSize = 11.sp, fontFamily = FontFamily.Monospace
-            )
-            McButton("1 · avisar só a partir de 15 km/h (recomendado)", !busy, Color(0xFF2E7D32)) {
-                setLimitMode(1, "a partir de 15 km/h")
-            }
-            McButton("0 · avisar com qualquer movimento (fábrica)", !busy, Color(0xFF37474F)) {
-                setLimitMode(0, "qualquer movimento")
-            }
-            McButton("-1 · desligar o aviso em qualquer velocidade", !busy, Color(0xFFB71C1C)) {
-                setLimitMode(-1, "desligado")
-            }
-            Text(
-                "O modo 1 tem histerese: liga o aviso em 15 km/h e libera abaixo de 12 — resolve " +
-                    "parado no trânsito e manobra, mantendo o bloqueio em movimento. O -1 libera " +
-                    "vídeo na tela do motorista a qualquer velocidade; o risco e a exposição legal " +
-                    "são seus. Tudo reversível: é só um setting.",
-                color = Color(0xFF546E7A), fontSize = 10.sp
-            )
-        }
-
         // ── Card: estado / manutenção ────────────────────────────────────
         McCard {
             Text(
@@ -311,22 +326,29 @@ fun MediaCardTab() {
                 Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
+        }
     }
 }
 
 /**
- * SPIKE — cards por overlay, sem Frida (overlay/MediaCardOverlay.kt).
- * Liga, calibra pela hierarquia real da mídia (uiautomator) e mostra os tempos
- * medidos desde o boot. Para medir o boot de verdade: liga, calibra, reinicia a
- * central, abre a mídia e volta aqui.
+ * Cards da mídia por overlay, sem Frida (overlay/MediaCardOverlay.kt) — o modo
+ * padrão. Mesmas opções A-D do modo antigo, mas desenhadas por uma janela nossa
+ * por cima da fileira, visível só com a mídia no topo. O Shizuku só entra para
+ * conceder os appops, calibrar e alimentar a temperatura.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OverlaySpikeCard() {
+private fun OverlayCardsSection() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val on by MediaCardOverlay.enabled.collectAsState()
     val status by MediaCardOverlay.status.collectAsState()
     val rect by MediaCardOverlay.rect.collectAsState()
+    val calibrated by MediaCardOverlay.calibrated.collectAsState()
+    val mode by MediaCardOverlay.mode.collectAsState()
+    val items by MediaCardOverlay.items.collectAsState()
+    val bg by MediaCardOverlay.bgColor.collectAsState()
+    val temps by MediaCardOverlay.temps.collectAsState()
     val timings by MediaCardOverlay.timings.collectAsState()
     val lastBoot by MediaCardOverlay.lastBoot.collectAsState()
     val log by MediaCardOverlay.log.collectAsState()
@@ -334,27 +356,94 @@ private fun OverlaySpikeCard() {
     var busy by remember { mutableStateOf(false) }
     var rectText by remember(rect) { mutableStateOf(rect.toString()) }
     var result by remember { mutableStateOf("") }
+    var showDiag by remember { mutableStateOf(false) }
+    val sel = remember(items) { mutableStateListOf(*items.toTypedArray()) }
+
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { MediaCardOverlay.load() } }
+
+    fun applyCfg(m: MediaCardOverlay.Mode, list: List<String>, what: String) {
+        MediaCardOverlay.setConfig(m, list)
+        if (!on) MediaCardOverlay.setEnabled(ctx, true)
+        result = "aplicado: $what"
+    }
 
     McCard {
-        Text("Spike · cards por overlay (sem Frida)", color = Color(0xFFFFD54F), fontSize = 12.sp,
+        Text("Cards da mídia · overlay (padrão)", color = Color(0xFFFFD54F), fontSize = 12.sp,
             fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
         Text(
-            "Uma janela nossa (Compose) cobre a fileira de mídia online só enquanto a " +
-                "MediaCenterActivity está no topo. Nada é injetado no app do OEM. Topo lido pelo " +
-                "UsageStats, sem esperar o Shizuku (ele só concede os appops na 1ª vez; " +
-                "ITaskStackListener via Shizuku é o plano B). Os cards abrem a PWA por npwas://.",
+            "Uma janela nossa cobre a fileira de mídia online só enquanto a tela de mídia está " +
+                "aberta. Nada é injetado no app do OEM e o boot não espera o Shizuku (ele só " +
+                "concede as permissões na 1ª vez, calibra e alimenta a temperatura).",
             color = Color(0xFF90A4AE), fontSize = 10.sp
         )
         Text(
-            (if (on) "● ligado" else "○ desligado") + " · " + status,
+            (if (on) "● ligado" else "○ desligado (mídia de fábrica)") + " · " + status,
             color = if (on) Color(0xFF81C784) else Color(0xFF90A4AE),
             fontSize = 11.sp, fontFamily = FontFamily.Monospace
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            McButton(if (on) "desligar spike" else "ligar spike", !busy,
-                if (on) Color(0xFF455A64) else Color(0xFF2E7D32), Modifier.weight(1f)) {
-                MediaCardOverlay.setEnabled(ctx, !on)
+        if (!calibrated) Text(
+            "⚠ posição ainda não calibrada: toque em \"calibrar\" (abre a mídia e mede a fileira).",
+            color = Color(0xFFFFB74D), fontSize = 11.sp
+        )
+        Text(
+            "atual: " + when (mode) {
+                MediaCardOverlay.Mode.HIDE -> "título e fileira escondidos"
+                MediaCardOverlay.Mode.CARDS ->
+                    if (items.isEmpty()) "fileira vazia"
+                    else items.mapNotNull { CardCatalog.byId(it)?.label }.joinToString(", ")
+            },
+            color = Color(0xFFB0BEC5), fontSize = 11.sp, fontFamily = FontFamily.Monospace
+        )
+
+        Text("Opções rápidas", color = Color(0xFF80CBC4), fontSize = 12.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        McButton("A · remover Deezer, colocar TuneIn", !busy, Color(0xFF2E7D32)) {
+            applyCfg(MediaCardOverlay.Mode.CARDS, listOf("tunein"), "só TuneIn")
+        }
+        McButton("B · fileira vazia (some o Deezer, título fica)", !busy, Color(0xFFB71C1C)) {
+            applyCfg(MediaCardOverlay.Mode.CARDS, emptyList(), "fileira vazia")
+        }
+        McButton("C · esconder o menu inteiro (título + fileira)", !busy, Color(0xFF6D4C41)) {
+            applyCfg(MediaCardOverlay.Mode.HIDE, emptyList(), "bloco escondido")
+        }
+        McButton("D · temperatura no lugar da fileira", !busy, Color(0xFF0277BD)) {
+            applyCfg(MediaCardOverlay.Mode.CARDS, listOf(CardCatalog.TEMP), "temperatura")
+        }
+        McButton(if (on) "desligar (volta a mídia de fábrica)" else "ligar", !busy,
+            if (on) Color(0xFF37474F) else Color(0xFF2E7D32)) {
+            MediaCardOverlay.setEnabled(ctx, !on)
+        }
+
+        Text("Montar os cards", color = Color(0xFF80CBC4), fontSize = 12.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Text(
+            "A ordem segue a ordem de seleção. Todos abrem a PWA por npwas:// no content shell, " +
+                "sem depender de provisionamento. \"Temperatura\" mostra externa/interna.",
+            color = Color(0xFF90A4AE), fontSize = 10.sp
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CardCatalog.ALL.forEach { c ->
+                val picked = sel.contains(c.id)
+                FilterChip(
+                    selected = picked,
+                    onClick = { if (picked) sel.remove(c.id) else sel.add(c.id) },
+                    label = { Text(c.label + "  · " + c.sub, fontSize = 11.sp) }
+                )
             }
+        }
+        McButton("aplicar seleção", !busy, Color(0xFF6A1B9A)) {
+            applyCfg(MediaCardOverlay.Mode.CARDS, sel.toList(),
+                if (sel.isEmpty()) "fileira vazia" else sel.joinToString(","))
+        }
+        Text(
+            "temperatura: externa ${formatTempLabel(temps.first)} · interna ${formatTempLabel(temps.second)}" +
+                " (último valor salvo; atualiza ao vivo com o Shizuku)",
+            color = Color(0xFF546E7A), fontSize = 10.sp
+        )
+
+        Text("Ajuste", color = Color(0xFF80CBC4), fontSize = 12.sp,
+            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             McButton("calibrar (abre a mídia)", !busy && on, Color(0xFF0277BD), Modifier.weight(1f)) {
                 busy = true; result = "calibrando…"
                 scope.launch {
@@ -362,9 +451,7 @@ private fun OverlaySpikeCard() {
                     busy = false
                 }
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            McButton(if (forced) "parar de forçar" else "forçar visível (teste)", on, Color(0xFF6D4C41),
+            McButton(if (forced) "parar de forçar" else "forçar visível", on, Color(0xFF6D4C41),
                 Modifier.weight(1f)) {
                 MediaCardOverlay.setForceVisible(!forced)
             }
@@ -375,7 +462,7 @@ private fun OverlaySpikeCard() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = rectText, onValueChange = { rectText = it },
-                label = { Text("x,y,largura,altura (px de tela)", fontSize = 10.sp) },
+                label = { Text("fileira: x,y,largura,altura (px de tela)", fontSize = 10.sp) },
                 singleLine = true, modifier = Modifier.weight(1f),
                 textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                     color = Color(0xFFE0E0E0))
@@ -386,33 +473,38 @@ private fun OverlaySpikeCard() {
                 else { MediaCardOverlay.setRect(r); result = "retângulo $r" }
             }
         }
+        Text(
+            String.format("fundo amostrado: #%06X", bg and 0xFFFFFF),
+            color = Color(0xFF546E7A), fontSize = 10.sp, fontFamily = FontFamily.Monospace
+        )
         if (result.isNotEmpty()) Text(result, color = Color(0xFFB0BEC5), fontSize = 11.sp,
             fontFamily = FontFamily.Monospace)
 
-        Text("Tempos (desde o boot)", color = Color(0xFF80CBC4), fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-        if (timings.isEmpty()) Text("— ligue o spike —", color = Color(0xFF3A3A4E), fontSize = 10.sp)
-        else timings.forEach {
-            Text(it, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        }
-        if (lastBoot.isNotEmpty()) {
-            Text("Último boot medido", color = Color(0xFF80CBC4), fontSize = 11.sp,
+        McButton(if (showDiag) "esconder diagnóstico" else "diagnóstico (tempos e log)", true,
+            Color(0xFF37474F)) { showDiag = !showDiag }
+        if (showDiag) {
+            Text("Tempos (desde o boot)", color = Color(0xFF80CBC4), fontSize = 11.sp,
                 fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-            Text(lastBoot, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            if (timings.isEmpty()) Text("— ligue o overlay —", color = Color(0xFF3A3A4E), fontSize = 10.sp)
+            else timings.forEach {
+                Text(it, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+            if (lastBoot.isNotEmpty()) {
+                Text("Último boot medido", color = Color(0xFF80CBC4), fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text(lastBoot, color = Color(0xFFB0BEC5), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+            Text("Log", color = Color(0xFF80CBC4), fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            log.take(25).forEach {
+                Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
         }
-        Text("Log do spike", color = Color(0xFF80CBC4), fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-        log.take(25).forEach {
-            Text(it, color = Color(0xFF90A4AE), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        }
-        Text(
-            "Medir o boot: ligue, calibre, reinicie a central e abra a mídia. \"cards visíveis " +
-                "(1ª vez)\" é o número a comparar com o Frida; \"evento→visível\" é o atraso " +
-                "entre a troca de tela e os cards aparecerem.",
-            color = Color(0xFF546E7A), fontSize = 10.sp
-        )
     }
 }
+
+private fun formatTempLabel(raw: String?): String =
+    raw?.toFloatOrNull()?.let { "${Math.round(it)}°" } ?: "--"
 
 @Composable
 private fun McCard(content: @Composable ColumnScope.() -> Unit) {

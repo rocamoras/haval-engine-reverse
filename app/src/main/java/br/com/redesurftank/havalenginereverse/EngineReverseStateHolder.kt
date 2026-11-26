@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import br.com.redesurftank.havalenginereverse.overlay.MediaCardOverlay
 import br.com.redesurftank.havalenginereverse.services.UniversalMonitorService
 import java.util.concurrent.atomic.AtomicLong
 
@@ -115,6 +116,10 @@ object EngineReverseStateHolder {
         // Espelhamento: dispara ANTES do filtro de ignorados para não depender da UI.
         if (key == OUTSIDE_TEMP_SENSOR_KEY) {
             UniversalMonitorService.onOutsideTempSensorChanged(value)
+        }
+        // Card de temperatura do overlay da mídia: guarda o último valor para o boot.
+        if (key == MediaCardOverlay.KEY_OUTSIDE || key == MediaCardOverlay.KEY_INSIDE) {
+            MediaCardOverlay.onVehicleValue(key, value)
         }
         // Chaves ignoradas não recebem mais atualizações na grid
         if (ignoredKeys.contains(key)) return
